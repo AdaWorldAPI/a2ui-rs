@@ -31,13 +31,14 @@ because they are the *reimagining of A2UI*, not OGAR core.
 - **W0 — repo + regrade** — *DONE.* `AdaWorldAPI/a2ui-rs` minted; A2UI-fork
   `hamming.proto` regraded (shape kept, payload marked pre-V3, charter C2).
   Council verified the charter spec (#204/#205).
-- **W1 — surface contract (canon-free, in OGAR)** — *CODED, PR OGAR #206 open.*
+- **W1 — surface contract (canon-free, in OGAR)** — *MERGED (OGAR #206).*
   `ogar-a2ui-frame`: `FRAME_VERSION`, `FrameKind{NodeDelta,ActionInvoke}` (closed),
   `NodeDelta{key:[u8;16], mask_words:Vec<u64>, values}`, `ActionInvoke{key,
   action_ordinal, args}`, `to_le_bytes`/`from_le_bytes`, `mask_positions`,
   `FrameError` refusals. `#![forbid(unsafe_code)]`, zero hot-path deps, serde
-  membrane-only. **a2ui-core re-exports these** (seed shipped; git-dep floats on
-  the W1 branch until #206 merges, then flips to `main`).
+  membrane-only. **a2ui-core re-exports these** — git-dep flipped from the W1
+  branch to `branch = "main"` (float-then-flip complete; the drift-fuse smoke
+  test stays green against `main#cc701ea6`).
 - **W2 — a2ui-server transcode** — *NEXT.* RenderStream / ActionStream /
   codebook-sync service shape reimplemented over the W1 frames (the shape kept
   from the A2UI fork's `hamming.proto`, payload replaced by the V3 facet).

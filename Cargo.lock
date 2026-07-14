@@ -12,4 +12,4 @@ dependencies = [
 [[package]]
 name = "ogar-a2ui-frame"
 version = "0.1.0"
-source = "git+https://github.com/AdaWorldAPI/OGAR?branch=claude%2Fogar-a2ui-frame-w1#88c9cb99d4adff315b46a7ad1ea14d839d665e78"
+source = "git+https://github.com/AdaWorldAPI/OGAR?branch=main#cc701ea61710b0baa7a78af70ce72a0875547335"
