@@ -13,3 +13,10 @@ description = "The a2ui-rs render-target core: consumes ogar-a2ui-frame (the add
 # that OGAR #206 has merged — the workspace's float-then-flip pattern
 # (spider_doc_ir precedent). Drift protection is the smoke test below.
 ogar-a2ui-frame = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+
+[features]
+default = []
+# Membrane-only: forwards ogar-a2ui-frame's serde derives so an edge adapter
+# (e.g. a2ui-server's `json` feature) can (de)serialize frames for a non-wasm
+# client. NEVER the hot path (the hot path is LE bytes end-to-end, charter T3).
+serde = ["ogar-a2ui-frame/serde"]

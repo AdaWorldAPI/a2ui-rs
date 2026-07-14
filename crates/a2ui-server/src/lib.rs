@@ -49,6 +49,8 @@
 
 pub mod action_stream;
 pub mod desktop;
+#[cfg(feature = "json")]
+pub mod membrane;
 pub mod project;
 pub mod render_stream;
 pub mod session;

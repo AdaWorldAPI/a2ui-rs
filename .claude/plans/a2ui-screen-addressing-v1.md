@@ -49,9 +49,12 @@ because they are the *reimagining of A2UI*, not OGAR core.
   role-mask gates). 22 unit tests. The render half is the upstream OGAR brick
   `ogar-render-askama::field_view` (`render_field_view`, added same arc —
   `data-field-pos` = mask address, `data-action-ordinal` = ActionDef address,
-  `escape="html"` no `|safe`, on OGAR `main` via #207). Membrane adapters
-  (JSON/proto) only at the edge, behind a feature (T3) — deferred; the hot path
-  is LE + AEAD. All OGAR deps flipped to `main` (float-then-flip complete).
+  `escape="html"` no `|safe`, on OGAR `main` via #207). Membrane adapter DONE:
+  `a2ui-server::membrane` (feature `json`, off by default) — `Frame ↔ JSON` at
+  the EDGE only for a non-wasm client (charter C1.2); the default build is
+  serde-free so the server→wasm hot path stays LE + AEAD (T3), verified by the
+  round-trip `LE → Frame → JSON → Frame → LE` byte-identity test. All OGAR deps
+  flipped to `main` (float-then-flip complete).
 - **W3 — a2ui-wasm fieldview client** — *CORE DONE (crate `a2ui-wasm`).* The
   `FieldviewClient` holds the ClassView/template codebook (the font of the
   desktop) + per-node facet state, ingests `NodeDelta` LE bytes (W1 load gate,
