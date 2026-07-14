@@ -24,6 +24,15 @@ ogar-encryption = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main"
 # — the SAME entropy source ogar-encryption's envelope uses (OS getrandom); not
 # a crypto primitive, just entropy access. Makes the nonce-safe path the easy one.
 getrandom = "0.2"
+# JSON membrane (edge-only, feature `json`). NEVER on the hot path.
+serde_json = { version = "1.0", optional = true }
+
+[features]
+default = []
+# Membrane adapter: enables a2ui-core's serde forward + serde_json so a non-wasm
+# client can (de)serialize frames as JSON at the EDGE (charter C1.2). The
+# server→wasm hot path is LE + AEAD and never touches this (T3).
+json = ["a2ui-core/serde", "dep:serde_json"]
 
 [dev-dependencies]
 # The ruff-codegen'd canonical shapes (Class + ActionDef) — the P-REHOST-lite
