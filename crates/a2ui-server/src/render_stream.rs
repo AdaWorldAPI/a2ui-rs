@@ -30,6 +30,20 @@
 //! folded onto a facet byte), mirroring
 //! [`ClassView::facet_rows`](lance_graph_contract::class_view::ClassView::facet_rows)'
 //! own 12-byte rule.
+//!
+//! **Gate/emit asymmetry (fail-safe, documented):** the RBAC gate
+//! ([`project_surface`](crate::project::project_surface)) validates over the
+//! FULL surface `full_for(field_count)` — including positions `>= 12` — while
+//! this emit loop only carries positions `< 12` (facet scope). So a role that
+//! is granted ONLY fields `>= 12` clears the gate (its projection is non-empty)
+//! yet produces an EMPTY `NodeDelta` — a blank surface, not a
+//! [`RbacError::EmptyProjection`] refusal. This is fail-SAFE (nothing
+//! unauthorized leaks — the delta is empty, not over-broad) and deliberately
+//! not "fixed" to refuse: the `>= 12` value-slab fields are real, and a future
+//! value-slab render path WILL emit them, at which point that role renders a
+//! real surface. Refusing here would wrongly reject a legitimate value-slab
+//! grant. Until that path exists, such a role simply sees an empty facet
+//! surface.
 
 use a2ui_core::NodeDelta;
 use lance_graph_contract::class_view::{ClassId, ClassView, WideFieldMask};

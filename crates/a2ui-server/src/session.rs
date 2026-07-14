@@ -29,6 +29,9 @@ pub enum SessionError {
     /// refused at establishment (fail-closed, the sentinel ban applied at the
     /// session boundary, not just per-projection).
     NoRoleGrant,
+    /// The platform CSPRNG was unavailable when drawing a fresh salt
+    /// ([`Session::establish_random_salt`]).
+    Rng,
 }
 
 impl core::fmt::Display for SessionError {
@@ -37,6 +40,7 @@ impl core::fmt::Display for SessionError {
             Self::Kdf(e) => write!(f, "session key derivation failed: {e}"),
             Self::InvertedRange => f.write_str("granted classid range is inverted (lo > hi)"),
             Self::NoRoleGrant => f.write_str("session role mask is empty — refused"),
+            Self::Rng => f.write_str("platform CSPRNG unavailable for a fresh session salt"),
         }
     }
 }
@@ -63,6 +67,27 @@ impl Session {
     /// browser/wasm client that re-derives on each connect, [`KdfParams::DEFAULT`]
     /// for a server-grade derivation. The derivation runs exactly once per
     /// session; every frame thereafter is a cheap XChaCha20 seal/open.
+    ///
+    /// # ⚠ The `salt` MUST be a fresh CSPRNG draw per session (security-critical)
+    ///
+    /// The Argon2id KDF is **deterministic**: the same `(secret, salt)` yields
+    /// the same 32-byte key. The [`SealedTransport`](crate::transport::SealedTransport)
+    /// nonces are per-direction COUNTERS starting at 0, whose uniqueness rests
+    /// ENTIRELY on the key being unique per session. So **reusing a salt across
+    /// two sessions reuses the key, and both counter streams start at 0 →
+    /// identical `(key, nonce)` pairs** — the one catastrophic XChaCha20-Poly1305
+    /// failure mode (keystream reuse → plaintext recovery; Poly1305 one-time-key
+    /// reuse → forgery). The direction byte does not save you; it is identical
+    /// across the two sessions too.
+    ///
+    /// Therefore `salt` MUST be a fresh 16-byte value from the platform CSPRNG
+    /// for every session. Do NOT derive it from a stable user/tenant id, a
+    /// counter, or any reused constant. **Prefer
+    /// [`establish_random_salt`](Session::establish_random_salt)**, which draws
+    /// the salt for you and returns it (the salt is public — send it to the peer
+    /// so it derives the same key). This raw entry point exists for the peer
+    /// side of a handshake (which receives the salt) and for deterministic
+    /// tests; a fixed salt is *test-only*.
     ///
     /// # Errors
     ///
@@ -91,6 +116,34 @@ impl Session {
             class_lo,
             class_hi,
         })
+    }
+
+    /// Establish a session with a **fresh CSPRNG salt** — the safe path made
+    /// easy. Draws a 16-byte salt from the platform CSPRNG (`getrandom`, the
+    /// same entropy source `ogar-encryption`'s envelope uses), derives the key,
+    /// and returns `(session, salt)`.
+    ///
+    /// The salt is **public**, not a secret: hand the returned salt to the peer
+    /// during session init so it calls [`establish`](Session::establish) with
+    /// the SAME `(secret, salt)` and derives the identical key. Because the salt
+    /// is fresh per call, two sessions never share a key — closing the
+    /// nonce-reuse hole [`establish`](Session::establish)'s doc warns about, by
+    /// construction.
+    ///
+    /// # Errors
+    ///
+    /// [`SessionError::Rng`] if the platform CSPRNG is unavailable, else the
+    /// same errors as [`establish`](Session::establish).
+    pub fn establish_random_salt(
+        secret: &[u8],
+        role_mask: WideFieldMask,
+        class_range: (ClassId, ClassId),
+        params: &KdfParams,
+    ) -> Result<(Self, [u8; 16]), SessionError> {
+        let mut salt = [0u8; 16];
+        getrandom::getrandom(&mut salt).map_err(|_| SessionError::Rng)?;
+        let session = Self::establish(secret, &salt, role_mask, class_range, params)?;
+        Ok((session, salt))
     }
 
     /// The 32-byte session key — hand this to a
@@ -131,6 +184,10 @@ mod tests {
         WideFieldMask::from_positions(&[0, 1, 2])
     }
 
+    // NOTE: the fixed salts throughout these tests are TEST-ONLY. Production
+    // MUST use a fresh CSPRNG salt per session (see `Session::establish`'s
+    // security note); prefer `establish_random_salt`. A reused salt reuses the
+    // key and causes catastrophic AEAD nonce reuse.
     #[test]
     fn establish_derives_a_deterministic_key() {
         let a = Session::establish(b"secret", &[7; 16], role(), (0x0100, 0x01FF), &FAST).unwrap();
@@ -139,6 +196,26 @@ mod tests {
 
         let c = Session::establish(b"secret", &[8; 16], role(), (0x0100, 0x01FF), &FAST).unwrap();
         assert_ne!(a.key(), c.key(), "different salt → different key");
+    }
+
+    #[test]
+    fn establish_random_salt_is_fresh_per_call_and_peer_re_derivable() {
+        // Two calls draw DIFFERENT salts → DIFFERENT keys (the nonce-reuse hole
+        // closed by construction: no two sessions share a key).
+        let (a, salt_a) =
+            Session::establish_random_salt(b"secret", role(), (0x0100, 0x01FF), &FAST).unwrap();
+        let (b, salt_b) =
+            Session::establish_random_salt(b"secret", role(), (0x0100, 0x01FF), &FAST).unwrap();
+        assert_ne!(salt_a, salt_b, "each call draws a fresh salt");
+        assert_ne!(a.key(), b.key(), "fresh salt → distinct session key");
+
+        // The returned salt is public: a peer re-derives the SAME key from it.
+        let peer = Session::establish(b"secret", &salt_a, role(), (0x0100, 0x01FF), &FAST).unwrap();
+        assert_eq!(
+            a.key(),
+            peer.key(),
+            "peer re-derives the identical key from the salt"
+        );
     }
 
     #[test]

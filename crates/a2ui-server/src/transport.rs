@@ -20,6 +20,16 @@
 //! XChaCha's nonce is 192-bit, a u64 counter cannot come close to wrapping in
 //! any real session.
 //!
+//! **This safety rests on one upstream invariant: the key is unique per
+//! session.** Counter nonces both start at 0, so if two sessions share a key
+//! they produce identical `(key, nonce)` pairs — the very failure the direction
+//! byte cannot prevent (it is identical across the two too). The key is unique
+//! only if the session salt is a fresh CSPRNG draw per session — see the
+//! security note on [`Session::establish`](crate::session::Session::establish)
+//! and prefer
+//! [`Session::establish_random_salt`](crate::session::Session::establish_random_salt),
+//! which guarantees it.
+//!
 //! # Sealed wire form
 //!
 //! ```text
