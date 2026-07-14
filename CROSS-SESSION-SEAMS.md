@@ -14,17 +14,17 @@
 > substrate) with lance-graph (the storage/query spine) this session — so
 > these answers went through a 5+3 falsification council before ratification.
 
-## 1. `ClassView` additivity — CONFIRMED, stronger than asked
+## 1. `ClassView` additivity — the STANDING NORM holds; the "Guard closed" rationale is CORRECTED
 
-**Guard is closed unbuilt** (E-MEDCARE-29, MedCare-rs #210 merged): the inc-3
-probe enumerated all 36 Guard-classified methods — 33 die with the
-`lettre`-replaced mail-collection classes, 3 are WinForms plumbing that is
-structural in Rust (`Option`/`Result`). There will be **no** validation
-phase, no `ClassView::constraints`, no `GuardRefused` variant. The upstream
-recipe ladder is COMPLETE at Compute (`execute_compute_dag`, inc 1) +
-Default (`execute_defaults`, lance-graph #690).
+**CORRECTED (council CLAIM-C → E-MEDCARE-30):** an earlier version of this
+answer said "Guard is closed unbuilt, so there will be **no** `ClassView::constraints`
+and the ladder is COMPLETE." That rationale is **retracted** — the classifier's
+Guard centroid structurally can't surface call-ing validators (22 real
+`FormErrorCheck_*` clinical guards misfile as Compute), so a guard-before-write
+primitive is **re-opened**, and if built it *could* add a `ClassView` method.
 
-Standing norm you can rely on: every recent `ClassView` addition
+**What you can actually rely on (this is the real answer, and it survives):**
+the additivity DISCIPLINE — every recent `ClassView` addition
 (`compute_dag`, `default_targets`, `menu_address`) landed as a **default
 method** — required-method additions would break lance-graph's own in-tree
 implementors, so the pressure against them is structural, not courtesy.
@@ -153,10 +153,10 @@ receipted) audited them. Grades:
 
 | answer | grade | what changed |
 |---|---|---|
-| 1 — `ClassView` additivity | **holds** (LOW risk) | unchanged |
+| 1 — `ClassView` additivity | **discipline holds; rationale corrected** | the additivity norm (additions are default-methods) survives; the "Guard closed → no `ClassView::constraints` → ladder COMPLETE" rationale is retracted (CLAIM-C / E-MEDCARE-30) — Guard is re-opened |
 | 2 — action seam / `action_ws` | **WRONG** | the "`action_ws` is the runtime dispatch protocol / `ResolvedAction` is a `SubmitAction` producer" claim retracted — `action_ws` is the arago/HIRO automation surface; consult OGAR `ACTIONDEF-VALUE-DISPATCH-PROPOSAL.md` |
 | 3 — Klickwege → graph | **WRONG in parts** | the invented `KlickwegEdge→ActionInvocation` field mapping retracted (type mismatch; `subject=System` not `User`); the landing *type* exists, the *lowering* + ownership are OPEN |
-| 4 — corpus pointer | **holds** | unchanged (E-MEDCARE-29 caveat noted) |
+| 4 — corpus pointer | **holds** | unchanged (E-MEDCARE-30 caveat noted) |
 
 Receipts and the full findings: MedCare-rs E-MEDCARE-30 + `AGENT_LOG.md`
 (council run), OGAR #208 (corrected), OGAR issue for the `contract::action`
