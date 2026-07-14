@@ -21,6 +21,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2ui-wasm"
+version = "0.1.0"
+dependencies = [
+ "a2ui-core",
+ "lance-graph-contract",
+ "ogar-render-askama",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "aead"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

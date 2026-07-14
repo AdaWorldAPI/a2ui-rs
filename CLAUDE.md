@@ -62,7 +62,7 @@ fallback). RBAC happens BEFORE framing — the frame is dumb transport.
 |---|---|---|
 | `a2ui-core` | re-exports `ogar-a2ui-frame` (W1 frames) | seed (shipped) |
 | `a2ui-server` | the graph desktop projection: RBAC-project (`WideFieldMask ∩ role`, fail-closed) → `NodeDelta` + askama fieldview down; `ActionInvoke` up by ordinal address; `ogar-encryption` sealed session transport | **W2 shipped** (22 unit tests + P-REHOST-lite green) |
-| `a2ui-wasm` (planned) | the fieldview client — ClassView resolve + askama → wasm; LE ingest zero-copy | W3 |
+| `a2ui-wasm` | the fieldview client — ClassView codebook + per-node facet state; ingest `NodeDelta` LE bytes; resolve `key → ClassView → template`; render via the SAME `ogar-render-askama::render_field_view`; actions up by ordinal address | **W3 core** (7 tests; `wasm32-unknown-unknown` check green — the "browser IS the thin client" proof; canvas paint deferred) |
 
 Upstream deps are **all on `branch = "main"`** now (float-then-flip complete):
 `a2ui-core`'s `ogar-a2ui-frame` (W1, OGAR #206) and `a2ui-server`'s

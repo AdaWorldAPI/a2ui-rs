@@ -52,11 +52,21 @@ because they are the *reimagining of A2UI*, not OGAR core.
   `escape="html"` no `|safe`, on OGAR `main` via #207). Membrane adapters
   (JSON/proto) only at the edge, behind a feature (T3) — deferred; the hot path
   is LE + AEAD. All OGAR deps flipped to `main` (float-then-flip complete).
-- **W3 — a2ui-wasm fieldview client** — *PENDING.* ClassView resolve + askama
-  render compiled to wasm; LE ingest zero-copy; canvas/webgpu paint. This is
-  where "reference codepoints, don't stream rasters" becomes literal. The
-  server-side render (`ogar-render-askama::field_view`) it will compile is
-  already CODED — W3 is the wasm target + paint, not new render logic.
+- **W3 — a2ui-wasm fieldview client** — *CORE DONE (crate `a2ui-wasm`).* The
+  `FieldviewClient` holds the ClassView/template codebook (the font of the
+  desktop) + per-node facet state, ingests `NodeDelta` LE bytes (W1 load gate,
+  no serde), resolves `key → ClassView → template` (`concept_of_key`, zero
+  value decode), accumulates deltas, and renders the addressed fieldview
+  locally via the SAME `ogar-render-askama::render_field_view` the server uses.
+  Actions go up by ordinal address (`invoke_action` → `ActionInvoke`).
+  **`cargo check --target wasm32-unknown-unknown` GREEN — core AND the
+  `wasm-bindgen` wrapper (`wasm::FieldviewClientWasm`, feature `wasm`)** — the
+  charter C1.3 "the browser IS the thin client / same Rust" claim proven
+  mechanically. 7 native tests (delta apply + accumulate, unknown-class
+  fail-loud, value-underrun refusal, action round-trip, up-frame-rejected-as-
+  down). *Remaining:* the canvas/webgpu paint (turn the rendered surface into
+  pixels on the client's own silicon) + a browser e2e harness — the last-mile
+  UI, not new render logic.
 - **W4 — P-REHOST** — *THE GATE — GREEN (lite).* See below.
   `crates/a2ui-server/tests/p_rehost.rs` proves the whole mechanism end-to-end
   (harvested Class × ActionDef → codegen struct-of-methods via
