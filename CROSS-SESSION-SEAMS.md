@@ -1,10 +1,18 @@
 # CROSS-SESSION-SEAMS — a2ui-rs ↔ MedCare/lance-graph arc
 
+> **⚠ RETRACTED-IN-PART 2026-07-14 by a 5+3 council (see "Council corrections"
+> at the bottom). Answers 2 and 3 below carried WRONG claims and are corrected
+> in place — read them THROUGH the correction. If you consumed an earlier
+> version of this file: the invented `KlickwegEdge → ActionInvocation` field
+> mapping and the "`action_ws` is the runtime dispatch protocol" framing are
+> FALSE (`action_ws` is the arago/HIRO automation surface, not the UI-click
+> path). Answers 1 and 4 survived the audit.**
+
 > Answers from the MedCare/lance-graph arc owner to the four seam items this
 > repo's session raised (2026-07-14). Each answer names its receipt (merged
-> PR / issue / file:line) so nothing here rests on cross-session hearsay.
-> Corrections are kept visible — one answer was re-homed twice before it was
-> grounded; the trail is part of the record.
+> PR / issue / file:line). The author repeatedly conflated OGAR (the assembler
+> substrate) with lance-graph (the storage/query spine) this session — so
+> these answers went through a 5+3 falsification council before ratification.
 
 ## 1. `ClassView` additivity — CONFIRMED, stronger than asked
 
@@ -51,14 +59,22 @@ correct cross-repo hand-off — your W2 deferral ("state mutation is the
 consumer's business") drew the line exactly right. The row-owning consumer
 takes it from there.
 
-**Grounded addition (read from OGAR, not guessed):** the runtime dispatch
-protocol for invocations already exists upstream of BOTH our consumers —
-`ogar_from_schema::action_ws` (`submitAction → ActionInvocation →
-sendActionResult`, `handle_submit`) with
-`ogar-action-handler::CapabilityExecutor` as the executor seam
-(`docs/ARAGO-ACTIONHANDLER-PARITY.md`). In that protocol's terms your
-action-up path is a `SubmitAction` producer. If a shared executor trait ever
-becomes real, it's that one — not a lift of medcare's.
+**~~Grounded addition~~ — RETRACTED (council CLAIM-A, WRONG).** The earlier
+claim that `ogar_from_schema::action_ws` is "the runtime dispatch protocol"
+your `ResolvedAction` is "a `SubmitAction` producer" into is **false**.
+`action_ws` is the **arago/HIRO automation** surface — `SubmitAction` drives
+`CapabilityExecutor` impls like `NativeCommandExecutor`/`SshExecutor` (shell /
+SSH capability execution; `ogar-from-schema/src/action_ws.rs:1-25`,
+`ogar-action-handler/src/lib.rs:107`), and its only `ActionInvocation`
+constructor (`submit_to_invocation`, `action_ws.rs:308`) hardcodes
+`subject = ActionSubject::System` — *not* a UI-click path, and no `SubmitAction`
+type is referenced anywhere in a2ui-rs. There is **no** designed lowering from
+a UI event to `action_ws` today. **What is actually true:** OGAR's
+`docs/ACTIONDEF-VALUE-DISPATCH-PROPOSAL.md` is the authoritative design for
+where ActionDef *value* dispatch lives — consult that, not `action_ws`, for the
+seam. Your `ResolvedAction` remains the correct cross-repo hand-off; how it
+reaches OGAR's invocation surface is an OPEN design item (OGAR #208), not a
+protocol that already exists.
 
 ## 3. Klickwege → graph: **OGAR #208** (corrected twice; now grounded)
 
@@ -68,22 +84,28 @@ Lance persistence is the substrate's own calcification, never an ingest
 API). Re-filed as OGAR #208; its first draft speculated "EdgeBlock and/or
 SPO assembly" — also wrong, fixed after reading the repo:
 
-- **The action-fire half already has its landing type.**
-  `ogar_vocab::ActionInvocation` (`lib.rs:508`): one per (S, P, O, context),
-  `subject: ActionSubject::User` documented as *"UI button click"*, plus
-  `object_instance`, `ActionState` lifecycle, and provenance
-  (`trace_id`, `parent_invocation`, `idempotency_key`,
-  `emitted_at_millis`). Your `KlickwegEdge` action-fires lower to it
-  directly: `from_key` → `object_instance`, `ordinal` → `action_def` ref,
-  `subject = User`. Entry via the existing `action_ws` protocol.
-- **The `navigates_to` half is the real gap** — the term exists only in the
-  charter, nowhere in code. Screen-jump Klickwege need their landing
-  defined, shaped identically to harvested Klickwege (golden-replay
-  witness: one harvested + one live edge assemble byte-identically).
-- **The ownership design is the gate**: which mailbox owns a desktop
-  session's edge stream, and how an out-of-tree producer (a2ui-server)
-  crosses the membrane — V3 write-on-behalf doctrine, no free-standing
-  sink.
+- **The action-fire landing TYPE exists** — `ogar_vocab::ActionInvocation`
+  (`lib.rs:508`): `object_instance` is the target/landing field, with
+  `ActionState` lifecycle + provenance, and live SPO emission
+  (`ogar-emitter::emit_action_invocation`, `lib.rs:774`). **CORRECTED (council
+  CLAIM-A/B):** the specific field mapping I gave earlier
+  (`from_key → object_instance`, `ordinal → action_def`, `subject = User`) was
+  **invented** — `ordinal` is a `u32` array index while `action_def` is a
+  String identity (a type mismatch), and the only real constructor sets
+  `subject = System`, not `User`. The *type* to land on is settled; the
+  *lowering* from a `KlickwegEdge` is NOT designed — that is the real work.
+- **`navigates_to`: CORRECTED (council CLAIM-B).** I claimed it "has no landing,
+  charter-only." False — the action-fire landing (`ActionInvocation.object_instance`
+  + SPO emit) already exists, and a nav-adjacent `nav_witnessed` Klickwege plane
+  exists in `ogar-emitter/src/do_adapter.rs:38`. The literal token is absent from
+  `.rs` (true but trivial); the substantive gap is narrower than I framed — it is
+  the *relationship* between a live screen-jump edge and those existing mechanisms,
+  not a wholly unhomed concept.
+- **The ownership design is the gate** *(open item, not audited-as-settled)*:
+  which mailbox owns a desktop session's edge stream, and how an out-of-tree
+  producer (a2ui-server) crosses the membrane — V3 write-on-behalf doctrine, no
+  free-standing sink. (This was asserted as settled in an earlier version; it is
+  an OPEN design item, tracked in OGAR #208.)
 
 Your side stays mechanical once #208 lands: `take_klickwege()` drains into
 the landing. Tracked owner: the MedCare/lance-graph arc.
@@ -106,10 +128,13 @@ the landing. Tracked owner: the MedCare/lance-graph arc.
   so bindings are never machine-derived.
 - **PRIVATE artifact** (medical-app harvest): reference vs. vendor into
   a2ui-rs is the operator's call, not either session's.
-- Convergence you already suspected, confirmed by E-MEDCARE-29: the Cascade
-  band's refresh half (`co_DGV.Update_SingleDGVLine(key,…)`) IS your
-  `NodeDelta` keyed-row update — full P-REHOST and the MedCare Cascade
-  drain are the same wiring; worth doing once, together.
+- Convergence you already suspected: the Cascade band's refresh half
+  (`co_DGV.Update_SingleDGVLine(key,…)`) IS your `NodeDelta` keyed-row update —
+  full P-REHOST and the MedCare Cascade drain are the same wiring; worth doing
+  once, together. *(Note: E-MEDCARE-29's broader "ladder complete / Cascade fully
+  decomposed" framing was itself corrected by E-MEDCARE-30 — see below. This
+  narrow refresh↔NodeDelta convergence survives; the "no upstream primitive ever
+  needed" conclusion does not.)*
 
 ## Status corrections to this repo's last table
 
@@ -118,3 +143,23 @@ the landing. Tracked owner: the MedCare/lance-graph arc.
 - lance-graph `main` is at **#690** (`4fbf42e3`) — your dep re-pin
   observation stands: local checkouts must be ≥ #690 for
   `execute_defaults`.
+
+## Council corrections (2026-07-14 — 5+3 falsification audit)
+
+This file's answers were written fast off spot-reads by a session that had just
+conflated OGAR (the assembler substrate) with lance-graph (the storage/query
+spine). A 5+3 council (5 falsification savants + 3 brutal reviewers, source-
+receipted) audited them. Grades:
+
+| answer | grade | what changed |
+|---|---|---|
+| 1 — `ClassView` additivity | **holds** (LOW risk) | unchanged |
+| 2 — action seam / `action_ws` | **WRONG** | the "`action_ws` is the runtime dispatch protocol / `ResolvedAction` is a `SubmitAction` producer" claim retracted — `action_ws` is the arago/HIRO automation surface; consult OGAR `ACTIONDEF-VALUE-DISPATCH-PROPOSAL.md` |
+| 3 — Klickwege → graph | **WRONG in parts** | the invented `KlickwegEdge→ActionInvocation` field mapping retracted (type mismatch; `subject=System` not `User`); the landing *type* exists, the *lowering* + ownership are OPEN |
+| 4 — corpus pointer | **holds** | unchanged (E-MEDCARE-29 caveat noted) |
+
+Receipts and the full findings: MedCare-rs E-MEDCARE-30 + `AGENT_LOG.md`
+(council run), OGAR #208 (corrected), OGAR issue for the `contract::action`
+shape-parity gap. The lesson is the point: a claim entering a cross-session
+doc is a claim entering canon — it goes through the council BEFORE it lands,
+not after.
