@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/a2ui-core"]
+members = ["crates/a2ui-core", "crates/a2ui-server"]
 
 [workspace.package]
 version = "0.1.0"
