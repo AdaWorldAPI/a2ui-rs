@@ -64,9 +64,9 @@ fallback). RBAC happens BEFORE framing — the frame is dumb transport.
 | `a2ui-server` (planned) | RenderStream/ActionStream over the frames; RBAC-projected before framing | W2 |
 | `a2ui-wasm` (planned) | the fieldview client — ClassView resolve + askama → wasm; LE ingest zero-copy | W3 |
 
-Upstream dep `ogar-a2ui-frame` **floats on its W1 branch until OGAR #206
-merges, then flips to `branch = "main"`** (the float-then-flip pattern; drift
-protection is `a2ui-core`'s smoke test, not a pin).
+Upstream dep `ogar-a2ui-frame` is on **`branch = "main"`** — flipped once OGAR
+#206 merged (the float-then-flip pattern; drift protection is `a2ui-core`'s
+smoke test, not a pin).
 
 ## The killer probe — P-REHOST (the arc's proof)
 
