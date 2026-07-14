@@ -75,13 +75,21 @@ because they are the *reimagining of A2UI*, not OGAR core.
   *-lite* only because a2ui-rs does not vendor the MedCare harvest — the probe
   uses a harvested-SHAPE stand-in class; the full corpus re-host is the
   remaining step before scale-out.
-- **W5 — rdp-2graph session** — *TRANSPORT CORE DONE.* `a2ui-server::session`
-  (`ogar-encryption` Argon2id KDF — the derivation runs ONCE per session) +
-  `a2ui-server::transport::SealedTransport` (XChaCha20-Poly1305 per-frame AEAD,
-  counter-nonce with direction separation + strict-monotonic replay/reorder
-  rejection) + role-mask projection (charter C1.4). Remaining: upstream
-  Klickwege events as the live `navigates_to` edge stream. The "Citrix without
-  pixels" session layer.
+- **W5 — rdp-2graph session** — *DONE (`a2ui-server::desktop::DesktopSession`).*
+  The C2 service shape as one object — the "Citrix without pixels" loop:
+  `render_node` (RenderStream: RBAC-project → seal `NodeDelta` down + fieldview),
+  `receive_action` (ActionStream: open sealed `ActionInvoke` → resolve by
+  ordinal address → **record a Klickweg edge**, C1.6), `sync_codebook`
+  (SyncCodebook: versioned template-codebook amortization). Built on
+  `a2ui-server::session` (`ogar-encryption` Argon2id KDF, once per session;
+  fresh-salt invariant enforced via `establish_random_salt`) +
+  `SealedTransport` (XChaCha20-Poly1305 per-frame AEAD, counter-nonce +
+  direction separation + strict-monotonic replay/reorder rejection) + role-mask
+  projection (C1.4). The Klickwege telemetry (`KlickwegEdge` — a click IS a
+  `navigates_to`/`ActionInvocation` edge, zero new vocabulary) accumulates
+  per-session and drains via `take_klickwege` for the graph. Salt/nonce-reuse
+  hardening landed (review on #4). Remaining: wire the drained Klickwege edges
+  into the live AriGraph SPO store (an OGAR-side hop).
 
 ## The killer probe — P-REHOST (charter C4)
 

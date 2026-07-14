@@ -48,12 +48,17 @@
 #![forbid(unsafe_code)]
 
 pub mod action_stream;
+pub mod desktop;
 pub mod project;
 pub mod render_stream;
 pub mod session;
 pub mod transport;
 
 pub use action_stream::{ActionError, ActionSpec, ResolvedAction, concept_of_key, resolve_action};
+pub use desktop::{
+    ClassCodebook, ClassEntry, CodebookSnapshot, DesktopError, DesktopSession, KlickwegEdge,
+    RenderedFrame,
+};
 pub use project::{RbacError, mask_to_words, project_surface};
 pub use render_stream::{Projection, ProjectionError, project_node};
 pub use session::{Session, SessionError};
