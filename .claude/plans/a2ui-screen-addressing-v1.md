@@ -49,8 +49,9 @@ because they are the *reimagining of A2UI*, not OGAR core.
   role-mask gates). 22 unit tests. The render half is the upstream OGAR brick
   `ogar-render-askama::field_view` (`render_field_view`, added same arc —
   `data-field-pos` = mask address, `data-action-ordinal` = ActionDef address,
-  `escape="html"` no `|safe`). Membrane adapters (JSON/proto) only at the edge,
-  behind a feature (T3) — deferred; the hot path is LE + AEAD.
+  `escape="html"` no `|safe`, on OGAR `main` via #207). Membrane adapters
+  (JSON/proto) only at the edge, behind a feature (T3) — deferred; the hot path
+  is LE + AEAD. All OGAR deps flipped to `main` (float-then-flip complete).
 - **W3 — a2ui-wasm fieldview client** — *PENDING.* ClassView resolve + askama
   render compiled to wasm; LE ingest zero-copy; canvas/webgpu paint. This is
   where "reference codepoints, don't stream rasters" becomes literal. The

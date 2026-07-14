@@ -475,7 +475,7 @@ source = "git+https://github.com/AdaWorldAPI/OGAR?branch=main#cc701ea61710b0baa7
 [[package]]
 name = "ogar-encryption"
 version = "0.1.0"
-source = "git+https://github.com/AdaWorldAPI/OGAR?branch=claude%2Fogar-a2ui-transcoding-b7xzrn#4b50da34bb11f871302c790786666372dc32be07"
+source = "git+https://github.com/AdaWorldAPI/OGAR?branch=main#df7331e0eecd1f1b7561045e64cbbfa22f93ea9c"
 dependencies = [
  "encryption",
 ]
@@ -483,7 +483,7 @@ dependencies = [
 [[package]]
 name = "ogar-render-askama"
 version = "0.1.0"
-source = "git+https://github.com/AdaWorldAPI/OGAR?branch=claude%2Fogar-a2ui-transcoding-b7xzrn#4b50da34bb11f871302c790786666372dc32be07"
+source = "git+https://github.com/AdaWorldAPI/OGAR?branch=main#df7331e0eecd1f1b7561045e64cbbfa22f93ea9c"
 dependencies = [
  "askama",
  "lance-graph-contract",
@@ -493,7 +493,7 @@ dependencies = [
 [[package]]
 name = "ogar-vocab"
 version = "0.1.0"
-source = "git+https://github.com/AdaWorldAPI/OGAR?branch=claude%2Fogar-a2ui-transcoding-b7xzrn#4b50da34bb11f871302c790786666372dc32be07"
+source = "git+https://github.com/AdaWorldAPI/OGAR?branch=main#df7331e0eecd1f1b7561045e64cbbfa22f93ea9c"
 
 [[package]]
 name = "once_cell"
