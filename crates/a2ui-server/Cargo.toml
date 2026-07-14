@@ -1,0 +1,33 @@
+[package]
+name = "a2ui-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs W2 service tier — the graph desktop projection: RBAC-project a class surface (WideFieldMask ∩ role, fail-closed) BEFORE framing, emit NodeDelta frames down + an askama fieldview surface, resolve ActionInvoke frames up by ordinal address, and carry it all over an ogar-encryption sealed session transport. Per AdaWorldAPI/OGAR docs/A2UI-SCREEN-ADDRESSING-PROPOSAL.md (W2/W5)."
+
+[dependencies]
+# The W1 addressed-surface frames (re-exported by a2ui-core).
+a2ui-core = { path = "../a2ui-core" }
+# The RBAC mask + the ClassView projection surface (WideFieldMask, ClassView,
+# ValueRow/RenderRow). lance-graph main.
+lance-graph-contract = { git = "https://github.com/AdaWorldAPI/lance-graph", branch = "main" }
+# The askama fieldview render brick (W2/W3 render half). On `main` since the
+# OGAR render PR (#207) merged — the float-then-flip pattern completed.
+ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# The single generic crypto surface (Argon2id KDF + XChaCha20-Poly1305 AEAD)
+# for the rdp-2graph sealed session transport (charter C1.5, W5). No new crypto.
+ogar-encryption = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+
+[dev-dependencies]
+# The ruff-codegen'd canonical shapes (Class + ActionDef) — the P-REHOST-lite
+# test drives render_class_with_methods_wide (the ruff-codegen DO-arm → askama
+# struct-of-methods) alongside the runtime fieldview, proving the whole path.
+ogar-vocab = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# The build-time codegen arm (the ruff-codegen DO-arm → askama struct-of-methods).
+ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# For the test's ClassView impl (FieldRef, DisplayTemplate) — unifies with the
+# normal dep (same git main source).
+lance-graph-contract = { git = "https://github.com/AdaWorldAPI/lance-graph", branch = "main" }

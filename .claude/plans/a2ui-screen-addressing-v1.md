@@ -31,26 +31,47 @@ because they are the *reimagining of A2UI*, not OGAR core.
 - **W0 — repo + regrade** — *DONE.* `AdaWorldAPI/a2ui-rs` minted; A2UI-fork
   `hamming.proto` regraded (shape kept, payload marked pre-V3, charter C2).
   Council verified the charter spec (#204/#205).
-- **W1 — surface contract (canon-free, in OGAR)** — *MERGED (OGAR #206).*
+- **W1 — surface contract (canon-free, in OGAR)** — *CODED, PR OGAR #206 open.*
   `ogar-a2ui-frame`: `FRAME_VERSION`, `FrameKind{NodeDelta,ActionInvoke}` (closed),
   `NodeDelta{key:[u8;16], mask_words:Vec<u64>, values}`, `ActionInvoke{key,
   action_ordinal, args}`, `to_le_bytes`/`from_le_bytes`, `mask_positions`,
   `FrameError` refusals. `#![forbid(unsafe_code)]`, zero hot-path deps, serde
-  membrane-only. **a2ui-core re-exports these** — git-dep flipped from the W1
-  branch to `branch = "main"` (float-then-flip complete; the drift-fuse smoke
-  test stays green against `main#cc701ea6`).
-- **W2 — a2ui-server transcode** — *NEXT.* RenderStream / ActionStream /
-  codebook-sync service shape reimplemented over the W1 frames (the shape kept
-  from the A2UI fork's `hamming.proto`, payload replaced by the V3 facet).
-  **RBAC-project BEFORE framing** — the frame is dumb transport. Membrane
-  adapters (JSON/proto) only at the edge, behind a feature (T3).
-- **W3 — a2ui-wasm fieldview client** — ClassView resolve + askama render
-  compiled to wasm; LE ingest zero-copy; canvas/webgpu paint. This is where
-  "reference codepoints, don't stream rasters" becomes literal.
-- **W4 — P-REHOST** — *THE GATE.* See below. No wave scales out before it is green.
-- **W5 — rdp-2graph session** — `ogar-auth` Argon2 KDF + `ogar-encryption`
-  transport + role-mask projection (charter C1.4) + upstream Klickwege events.
-  The "Citrix without pixels" session layer.
+  membrane-only. **a2ui-core re-exports these** (seed shipped; git-dep floats on
+  the W1 branch until #206 merges, then flips to `main`).
+- **W2 — a2ui-server transcode** — *DONE (crate `a2ui-server`).* The graph
+  desktop projection tier over the W1 frames: `project.rs` (RBAC
+  `WideFieldMask ∩ role`, **fail-closed** — the sentinel ban enforced;
+  `mask_to_words` bridges the wide mask to the wire), `render_stream.rs`
+  (`project_node`: node → `NodeDelta` down + the askama **fieldview** surface,
+  RBAC-projected BEFORE framing), `action_stream.rs` (`ActionInvoke` up →
+  `concept_of_key` + ordinal-address `ActionDef` resolution, trap T2),
+  `session.rs` (rdp-2graph capability: Argon2 session KDF + class-range +
+  role-mask gates). 22 unit tests. The render half is the upstream OGAR brick
+  `ogar-render-askama::field_view` (`render_field_view`, added same arc —
+  `data-field-pos` = mask address, `data-action-ordinal` = ActionDef address,
+  `escape="html"` no `|safe`, on OGAR `main` via #207). Membrane adapters
+  (JSON/proto) only at the edge, behind a feature (T3) — deferred; the hot path
+  is LE + AEAD. All OGAR deps flipped to `main` (float-then-flip complete).
+- **W3 — a2ui-wasm fieldview client** — *PENDING.* ClassView resolve + askama
+  render compiled to wasm; LE ingest zero-copy; canvas/webgpu paint. This is
+  where "reference codepoints, don't stream rasters" becomes literal. The
+  server-side render (`ogar-render-askama::field_view`) it will compile is
+  already CODED — W3 is the wasm target + paint, not new render logic.
+- **W4 — P-REHOST** — *THE GATE — GREEN (lite).* See below.
+  `crates/a2ui-server/tests/p_rehost.rs` proves the whole mechanism end-to-end
+  (harvested Class × ActionDef → codegen struct-of-methods via
+  `render_class_with_methods_wide`; RBAC-project; `NodeDelta` + fieldview down;
+  sealed transport round-trip; `ActionInvoke` up resolved by ordinal address).
+  *-lite* only because a2ui-rs does not vendor the MedCare harvest — the probe
+  uses a harvested-SHAPE stand-in class; the full corpus re-host is the
+  remaining step before scale-out.
+- **W5 — rdp-2graph session** — *TRANSPORT CORE DONE.* `a2ui-server::session`
+  (`ogar-encryption` Argon2id KDF — the derivation runs ONCE per session) +
+  `a2ui-server::transport::SealedTransport` (XChaCha20-Poly1305 per-frame AEAD,
+  counter-nonce with direction separation + strict-monotonic replay/reorder
+  rejection) + role-mask projection (charter C1.4). Remaining: upstream
+  Klickwege events as the live `navigates_to` edge stream. The "Citrix without
+  pixels" session layer.
 
 ## The killer probe — P-REHOST (charter C4)
 

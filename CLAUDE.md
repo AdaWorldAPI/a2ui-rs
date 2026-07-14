@@ -60,13 +60,15 @@ fallback). RBAC happens BEFORE framing — the frame is dumb transport.
 
 | crate | role | status |
 |---|---|---|
-| `a2ui-core` | re-exports `ogar-a2ui-frame` (W1 frames); grows the W2 service shape | seed (shipped) |
-| `a2ui-server` (planned) | RenderStream/ActionStream over the frames; RBAC-projected before framing | W2 |
+| `a2ui-core` | re-exports `ogar-a2ui-frame` (W1 frames) | seed (shipped) |
+| `a2ui-server` | the graph desktop projection: RBAC-project (`WideFieldMask ∩ role`, fail-closed) → `NodeDelta` + askama fieldview down; `ActionInvoke` up by ordinal address; `ogar-encryption` sealed session transport | **W2 shipped** (22 unit tests + P-REHOST-lite green) |
 | `a2ui-wasm` (planned) | the fieldview client — ClassView resolve + askama → wasm; LE ingest zero-copy | W3 |
 
-Upstream dep `ogar-a2ui-frame` is on **`branch = "main"`** — flipped once OGAR
-#206 merged (the float-then-flip pattern; drift protection is `a2ui-core`'s
-smoke test, not a pin).
+Upstream deps are **all on `branch = "main"`** now (float-then-flip complete):
+`a2ui-core`'s `ogar-a2ui-frame` (W1, OGAR #206) and `a2ui-server`'s
+`ogar-render-askama` (the fieldview brick, OGAR #207) + `ogar-encryption` — one
+OGAR source. The render half is the upstream OGAR brick
+`ogar-render-askama::field_view` (`render_field_view`).
 
 ## The killer probe — P-REHOST (the arc's proof)
 
