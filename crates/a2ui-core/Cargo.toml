@@ -1,0 +1,16 @@
+[package]
+name = "a2ui-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "The a2ui-rs render-target core: consumes ogar-a2ui-frame (the addressed-surface LE wire) and will grow the W2 service shape (RenderStream / ActionStream / codebook sync) per AdaWorldAPI/OGAR docs/A2UI-SCREEN-ADDRESSING-PROPOSAL.md."
+
+[dependencies]
+# The W1 addressed-surface frames (OGAR). Floats on the W1 branch until
+# OGAR #206 merges, then this ref flips to `branch = "main"` — the
+# workspace's established float-then-flip pattern (spider_doc_ir precedent);
+# drift protection is the smoke test below.
+ogar-a2ui-frame = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "claude/ogar-a2ui-frame-w1" }

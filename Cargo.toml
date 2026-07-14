@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["crates/a2ui-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/AdaWorldAPI/a2ui-rs"
+authors = ["AdaWorldAPI"]
+rust-version = "1.95"
