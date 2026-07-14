@@ -14,6 +14,7 @@ name = "a2ui-server"
 version = "0.1.0"
 dependencies = [
  "a2ui-core",
+ "getrandom",
  "lance-graph-contract",
  "ogar-encryption",
  "ogar-render-askama",

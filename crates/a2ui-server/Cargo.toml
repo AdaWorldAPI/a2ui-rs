@@ -20,6 +20,10 @@ ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "ma
 # The single generic crypto surface (Argon2id KDF + XChaCha20-Poly1305 AEAD)
 # for the rdp-2graph sealed session transport (charter C1.5, W5). No new crypto.
 ogar-encryption = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# Platform CSPRNG for the fresh per-session salt (Session::establish_random_salt)
+# — the SAME entropy source ogar-encryption's envelope uses (OS getrandom); not
+# a crypto primitive, just entropy access. Makes the nonce-safe path the easy one.
+getrandom = "0.2"
 
 [dev-dependencies]
 # The ruff-codegen'd canonical shapes (Class + ActionDef) — the P-REHOST-lite
