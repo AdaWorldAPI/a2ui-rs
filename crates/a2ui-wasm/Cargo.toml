@@ -1,0 +1,29 @@
+[package]
+name = "a2ui-wasm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs W3 fieldview client — the browser IS the thin client. The SAME Rust the server projects with (ClassView codebook + ogar-render-askama fieldview) compiles to wasm: ingest NodeDelta LE bytes zero-copy, accumulate per-node facet state, resolve key → ClassView → template, and render the addressed surface locally. Actions go up by ordinal address (ActionInvoke). Per AdaWorldAPI/OGAR docs/A2UI-SCREEN-ADDRESSING-PROPOSAL.md (W3)."
+
+[lib]
+# cdylib for the wasm32 target (the browser client); rlib so the logic is
+# unit-tested natively and reusable as a normal Rust crate.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The W1 addressed-surface frames (NodeDelta / ActionInvoke, LE wire).
+a2ui-core = { path = "../a2ui-core" }
+# The mask + ClassId (the client tracks which positions it has received).
+lance-graph-contract = { git = "https://github.com/AdaWorldAPI/lance-graph", branch = "main" }
+# The askama fieldview — the SAME render the server uses (charter C1.3: the
+# browser is the thin client because it is the same Rust).
+ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# wasm-bindgen surface for browser consumers — feature-gated so the native
+# rlib + tests build without it.
+wasm-bindgen = { version = "0.2", optional = true }
+
+[features]
+wasm = ["dep:wasm-bindgen"]
