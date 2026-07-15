@@ -73,42 +73,48 @@ a UI event to `action_ws` today. **What is actually true:** OGAR's
 `docs/ACTIONDEF-VALUE-DISPATCH-PROPOSAL.md` is the authoritative design for
 where ActionDef *value* dispatch lives — consult that, not `action_ws`, for the
 seam. Your `ResolvedAction` remains the correct cross-repo hand-off; how it
-reaches OGAR's invocation surface is an OPEN design item (OGAR #208), not a
-protocol that already exists.
+reaches OGAR's invocation surface is a compile-time lowering (OGAR #209 — a
+plain Rust fn + golden test), not a protocol that already exists.
 
-## 3. Klickwege → graph: **OGAR #208** (corrected twice; now grounded)
+## 3. Klickwege → graph: **OGAR #209** (final frame; #208 closed as hallucinated)
 
-Correction trail, kept honest: first filed as lance-graph #691 (mis-homed at
-the storage/query layer — **OGAR is the V3 substrate**, the live assembler;
-Lance persistence is the substrate's own calcification, never an ingest
-API). Re-filed as OGAR #208; its first draft speculated "EdgeBlock and/or
-SPO assembly" — also wrong, fixed after reading the repo:
+Correction trail, kept honest: lance-graph #691 (wrong repo — storage layer),
+then OGAR #208, which was itself hallucinated **three times over** (EdgeBlock
+speculation → `action_ws`-as-protocol → runtime ownership ceremony) and is now
+CLOSED, its body repurposed to state the two distinctions it kept violating.
+The from-scratch work item is **OGAR #209**, and the operator-ruled frame is:
 
-- **The action-fire landing TYPE exists** — `ogar_vocab::ActionInvocation`
-  (`lib.rs:508`): `object_instance` is the target/landing field, with
-  `ActionState` lifecycle + provenance, and live SPO emission
-  (`ogar-emitter::emit_action_invocation`, `lib.rs:774`). **CORRECTED (council
-  CLAIM-A/B):** the specific field mapping I gave earlier
-  (`from_key → object_instance`, `ordinal → action_def`, `subject = User`) was
-  **invented** — `ordinal` is a `u32` array index while `action_def` is a
-  String identity (a type mismatch), and the only real constructor sets
-  `subject = System`, not `User`. The *type* to land on is settled; the
-  *lowering* from a `KlickwegEdge` is NOT designed — that is the real work.
-- **`navigates_to`: CORRECTED (council CLAIM-B).** I claimed it "has no landing,
-  charter-only." False — the action-fire landing (`ActionInvocation.object_instance`
-  + SPO emit) already exists, and a nav-adjacent `nav_witnessed` Klickwege plane
-  exists in `ogar-emitter/src/do_adapter.rs:38`. The literal token is absent from
-  `.rs` (true but trivial); the substantive gap is narrower than I framed — it is
-  the *relationship* between a live screen-jump edge and those existing mechanisms,
-  not a wholly unhomed concept.
-- **The ownership design is the gate** *(open item, not audited-as-settled)*:
-  which mailbox owns a desktop session's edge stream, and how an out-of-tree
-  producer (a2ui-server) crosses the membrane — V3 write-on-behalf doctrine, no
-  free-standing sink. (This was asserted as settled in an earlier version; it is
-  an OPEN design item, tracked in OGAR #208.)
+**This is a compile-time, type-level seam.** Your repo is ordinary Rust:
+codegen emits into it, it depends on `ogar-vocab` (via `lance-graph-ogar`) as
+a plain type dependency, and cargo builds it (locally / CI / Railway pulling
+GitHub). Constructing a typed value is not a ceremony. The SoA / `temporal.rs`
+/ NARS / RBAC / mailbox write-on-behalf machinery is the running engine's
+*internal* mechanics — it never gates your build or your emission of a typed
+value. (The earlier "ownership design is the gate / membrane crossing"
+framing was the same hallucination in its third costume — retracted.)
 
-Your side stays mechanical once #208 lands: `take_klickwege()` drains into
-the landing. Tracked owner: the MedCare/lance-graph arc.
+What #209 actually tracks (small, cargo-testable):
+
+- **A lowering function** `KlickwegEdge → ogar_vocab::ActionInvocation`
+  (action-fire) / `nav_witnessed`-shaped value (screen jump) — plain Rust,
+  type-level decisions only: `ordinal: u32` → `action_def` String identity
+  (resolved via the ActionDef list you already hold), and what `subject` a
+  human click carries (the existing constructor sets `System`; a click is
+  presumably `User` — to be decided in #209).
+- **A golden test** — one harvested Klickweg and one live-emitted edge lower
+  to identical values. `cargo test`, nothing running.
+- Where drained values are *recorded* when an engine runs is a storage
+  concern (Lance calcification) — out of #209's scope and not your problem.
+
+Verified type receipts that survive from the audit:
+`ogar_vocab::ActionInvocation` (`lib.rs:508`, `object_instance`),
+`ogar-emitter::emit_action_invocation` (`lib.rs:774`), `nav_witnessed`
+(`ogar-emitter/src/do_adapter.rs:38`).
+
+Your side stays mechanical once #209 lands: `take_klickwege()` → the lowering
+fn → typed values. Tracked owner: the MedCare/lance-graph arc. Doctrine:
+lance-graph `.claude/knowledge/compilation-vs-runtime-substrate.md` +
+`assembler-vs-storage-substrate.md`.
 
 ## 4. The MedCare corpus — pointer + mapping precedent (authorization = operator)
 
@@ -159,7 +165,8 @@ receipted) audited them. Grades:
 | 4 — corpus pointer | **holds** | unchanged (E-MEDCARE-30 caveat noted) |
 
 Receipts and the full findings: MedCare-rs E-MEDCARE-30 + `AGENT_LOG.md`
-(council run), OGAR #208 (corrected), OGAR issue for the `contract::action`
+(council run), OGAR #208 (closed as hallucinated, repurposed) / #209 (the
+from-scratch rewrite), lance-graph #692 for the `contract::action`
 shape-parity gap. The lesson is the point: a claim entering a cross-session
 doc is a claim entering canon — it goes through the council BEFORE it lands,
 not after.
