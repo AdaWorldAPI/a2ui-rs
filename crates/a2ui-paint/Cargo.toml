@@ -1,0 +1,30 @@
+[package]
+name = "a2ui-paint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs paint tier — the consumer-agnostic renderer of the addressed FieldView surface. Derives a 2-D ADAPTIVE layout (mobile vs desktop) from FieldView.position (mask index) + ActionRef.ordinal over a Viewport, and hit-tests a click to an ordinal ADDRESS (never a handler, charter T2). askama-HTML and this paint tier are two renderers of ONE resolved surface (charter T1). The `wgpu` feature adds the GPU rasterizer (WebGPU + WebGL2). Per AdaWorldAPI/OGAR docs/A2UI-SCREEN-ADDRESSING-PROPOSAL.md."
+
+[dependencies]
+# The OGAR-owned addressed-surface types (FieldView / ActionRef). This crate
+# takes them as plain borrowed slices — the SAME types the askama render and the
+# a2ui-wasm client resolve. NO dep on a2ui-wasm; NO ogar-vocab; NO consumer crate.
+ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# The W1 up-frame (ActionInvoke) — a click hit builds the ordinal-addressed
+# up-frame directly (charter T2), so a consumer goes from pixel click to wire
+# bytes with only this crate + the resolved surface.
+a2ui-core = { path = "../a2ui-core" }
+# The GPU rasterizer — OFF by default. The paint-DATA path (layout + hit-test)
+# is pure and testable without it; `wgpu` adds the surface draw. wgpu backends
+# WebGPU + WebGL2, so one crate covers both browser targets. (N2 follow-up: the
+# full pipeline; the DATA path is what ships first.)
+wgpu = { version = "22", optional = true }
+
+[features]
+default = []
+# The GPU rasterization backend (WebGPU / WebGL2). The layout + hit-test core is
+# backend-agnostic; this feature wires the actual draw. See `gpu` module.
+wgpu = ["dep:wgpu"]

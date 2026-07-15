@@ -27,3 +27,10 @@ wasm-bindgen = { version = "0.2", optional = true }
 
 [features]
 wasm = ["dep:wasm-bindgen"]
+
+[dev-dependencies]
+# The paint tier — used ONLY by the G5 reusability test to prove a second
+# synthetic consumer renders AND paints through the identical client (render →
+# resolved-surface accessor → paint) with zero client-side change. Test-only;
+# a2ui-paint never depends on a2ui-wasm (the crate boundary the council kept).
+a2ui-paint = { path = "../a2ui-paint" }
