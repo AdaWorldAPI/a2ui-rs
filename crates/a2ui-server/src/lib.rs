@@ -72,3 +72,16 @@ pub use transport::{Direction, SealedTransport, TransportError};
 pub use a2ui_core::{ActionInvoke, Frame, FrameKind, NodeDelta};
 pub use lance_graph_contract::class_view::{ClassId, ClassView, WideFieldMask};
 pub use ogar_encryption::KdfParams;
+
+/// Lowercase hex of a 16-byte canonical GUID — the node's address, used both as
+/// the `data-key` on the rendered surface ([`render_stream`]) and as an
+/// `object_instance`/identity string in the #209 lowering ([`lowering`]). One
+/// definition, shared crate-internally (was duplicated in both modules).
+pub(crate) fn hex16(key: &[u8; 16]) -> String {
+    use core::fmt::Write;
+    let mut s = String::with_capacity(32);
+    for b in key {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
