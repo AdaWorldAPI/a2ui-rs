@@ -106,6 +106,24 @@ impl Viewport {
     }
 }
 
+/// The interaction SKIN — one object-projection editor, many skins (the
+/// projectional-knowledge-editor thesis). Each skin is a different RENDERER of
+/// the SAME resolved `&[FieldView]`/`&[ActionRef]` surface (charter T1: a skin is
+/// a render style, never a new widget vocabulary).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Skin {
+    /// The form skin — label/value rows (desktop columns; mobile stacked). The
+    /// default desktop/detail projection.
+    #[default]
+    Form,
+    /// The flow skin — document-style inline "label: value" runs that wrap at
+    /// the viewport width (the Word/prose projection). The first step toward the
+    /// projectional document editor.
+    Flow,
+    // Future skins (each a renderer of the same surface): Grid (spreadsheet),
+    // Spatial (CAD), Graph (native). See projectional-knowledge-editor-v1.md.
+}
+
 /// A field placed in the layout — its address (`position`) + where its label and
 /// value draw. The paint backend draws `label` at `label_rect` and `value` at
 /// `value_rect`; a click inside either resolves to this field's `position`.
@@ -225,65 +243,32 @@ const MOBILE_LINE_H: f32 = 24.0;
 const ACTION_H: f32 = 32.0;
 const ACTION_MIN_W: f32 = 88.0;
 
-/// Lay out an addressed surface for a viewport — the paint-DATA path. Turns the
-/// 1-D `position`/`ordinal` addresses into 2-D pixel rects, ADAPTIVELY: mobile
-/// stacks label-over-value in one column; desktop uses label/value columns.
-///
-/// Pure: same `(fields, actions, viewport)` → same layout, testable with nothing
-/// running.
+/// Lay out an addressed surface for a viewport with the default [`Skin::Form`].
+/// See [`layout_with_skin`].
 #[must_use]
 pub fn layout(fields: &[FieldView], actions: &[ActionRef], vp: &Viewport) -> PaintLayout {
-    let mut placed_fields = Vec::with_capacity(fields.len());
-    let mut y = PAD;
-    match vp.device {
-        DeviceClass::Desktop => {
-            let value_x = PAD + DESKTOP_LABEL_W + GAP;
-            let value_w = (vp.width - value_x - PAD).max(0.0);
-            for f in fields {
-                placed_fields.push(PlacedField {
-                    position: f.position,
-                    label: f.label.clone(),
-                    value: f.value.clone(),
-                    label_rect: Rect {
-                        x: PAD,
-                        y,
-                        w: DESKTOP_LABEL_W,
-                        h: DESKTOP_ROW_H,
-                    },
-                    value_rect: Rect {
-                        x: value_x,
-                        y,
-                        w: value_w,
-                        h: DESKTOP_ROW_H,
-                    },
-                });
-                y += DESKTOP_ROW_H;
-            }
-        }
-        DeviceClass::Mobile => {
-            let w = (vp.width - 2.0 * PAD).max(0.0);
-            for f in fields {
-                placed_fields.push(PlacedField {
-                    position: f.position,
-                    label: f.label.clone(),
-                    value: f.value.clone(),
-                    label_rect: Rect {
-                        x: PAD,
-                        y,
-                        w,
-                        h: MOBILE_LINE_H,
-                    },
-                    value_rect: Rect {
-                        x: PAD,
-                        y: y + MOBILE_LINE_H,
-                        w,
-                        h: MOBILE_LINE_H,
-                    },
-                });
-                y += 2.0 * MOBILE_LINE_H;
-            }
-        }
-    }
+    layout_with_skin(fields, actions, vp, Skin::Form)
+}
+
+/// Lay out an addressed surface for a viewport with an explicit [`Skin`] — the
+/// paint-DATA path. Turns the 1-D `position`/`ordinal` addresses into 2-D pixel
+/// rects; the SKIN chooses the field render style over the SAME resolved surface
+/// (Form = label/value rows, adaptive desktop/mobile; Flow = document-style
+/// inline wrap). The action row is shared across skins.
+///
+/// Pure: same `(fields, actions, viewport, skin)` → same layout, testable with
+/// nothing running.
+#[must_use]
+pub fn layout_with_skin(
+    fields: &[FieldView],
+    actions: &[ActionRef],
+    vp: &Viewport,
+    skin: Skin,
+) -> PaintLayout {
+    let (placed_fields, mut y) = match skin {
+        Skin::Form => place_form(fields, vp),
+        Skin::Flow => place_flow(fields, vp),
+    };
 
     // The action button row, below the fields, laid left-to-right (wrapping to a
     // new row when it would overflow the viewport width).
@@ -315,6 +300,107 @@ pub fn layout(fields: &[FieldView], actions: &[ActionRef], vp: &Viewport) -> Pai
         actions: placed_actions,
         content_height,
     }
+}
+
+/// Form skin — label/value rows, ADAPTIVE: desktop uses side-by-side columns;
+/// mobile stacks value below label. Returns the placed fields + the y at the
+/// bottom of the field area.
+fn place_form(fields: &[FieldView], vp: &Viewport) -> (Vec<PlacedField>, f32) {
+    let mut placed = Vec::with_capacity(fields.len());
+    let mut y = PAD;
+    match vp.device {
+        DeviceClass::Desktop => {
+            let value_x = PAD + DESKTOP_LABEL_W + GAP;
+            let value_w = (vp.width - value_x - PAD).max(0.0);
+            for f in fields {
+                placed.push(PlacedField {
+                    position: f.position,
+                    label: f.label.clone(),
+                    value: f.value.clone(),
+                    label_rect: Rect {
+                        x: PAD,
+                        y,
+                        w: DESKTOP_LABEL_W,
+                        h: DESKTOP_ROW_H,
+                    },
+                    value_rect: Rect {
+                        x: value_x,
+                        y,
+                        w: value_w,
+                        h: DESKTOP_ROW_H,
+                    },
+                });
+                y += DESKTOP_ROW_H;
+            }
+        }
+        DeviceClass::Mobile => {
+            let w = (vp.width - 2.0 * PAD).max(0.0);
+            for f in fields {
+                placed.push(PlacedField {
+                    position: f.position,
+                    label: f.label.clone(),
+                    value: f.value.clone(),
+                    label_rect: Rect {
+                        x: PAD,
+                        y,
+                        w,
+                        h: MOBILE_LINE_H,
+                    },
+                    value_rect: Rect {
+                        x: PAD,
+                        y: y + MOBILE_LINE_H,
+                        w,
+                        h: MOBILE_LINE_H,
+                    },
+                });
+                y += 2.0 * MOBILE_LINE_H;
+            }
+        }
+    }
+    (placed, y)
+}
+
+/// Flow skin — document-style inline "label value" runs flowing left-to-right,
+/// wrapping at the viewport width (the Word/prose projection). Each field's
+/// `label_rect` is the label run and `value_rect` the value run just after it,
+/// so a click on either still resolves to the field's `position`. The first
+/// concrete projectional skin over the shared surface.
+fn place_flow(fields: &[FieldView], vp: &Viewport) -> (Vec<PlacedField>, f32) {
+    const CH_W: f32 = 8.0; // deterministic per-char advance (a real theme measures glyphs)
+    let line_h = DESKTOP_ROW_H;
+    let max_x = (vp.width - PAD).max(PAD);
+    let mut placed = Vec::with_capacity(fields.len());
+    let mut x = PAD;
+    let mut y = PAD;
+    for f in fields {
+        let label_w = (f.label.chars().count() as f32 + 1.0) * CH_W; // "label "
+        let value_w = (f.value.chars().count().max(1) as f32) * CH_W;
+        let run_w = label_w + value_w + GAP;
+        if x + run_w > max_x && x > PAD {
+            x = PAD;
+            y += line_h;
+        }
+        placed.push(PlacedField {
+            position: f.position,
+            label: f.label.clone(),
+            value: f.value.clone(),
+            label_rect: Rect {
+                x,
+                y,
+                w: label_w,
+                h: line_h,
+            },
+            value_rect: Rect {
+                x: x + label_w,
+                y,
+                w: value_w,
+                h: line_h,
+            },
+        });
+        x += run_w + GAP;
+    }
+    let after = if placed.is_empty() { PAD } else { y + line_h };
+    (placed, after)
 }
 
 /// The GPU rasterization backend (WebGPU / WebGL2 via wgpu). OFF by default —
@@ -439,6 +525,38 @@ mod tests {
             lay.click_to_action_frame(key, vr.x + 2.0, vr.y + 2.0)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn flow_skin_lays_fields_inline_over_the_same_surface() {
+        // The projectional thesis: one resolved surface, two skins. Form stacks
+        // label/value rows; Flow flows "label value" runs inline (the document
+        // projection). Same fields/actions, different render — never a new
+        // vocabulary (T1).
+        let vp = Viewport::new(1000.0, 800.0);
+        let form = layout_with_skin(&fields(), &actions(), &vp, Skin::Form);
+        let flow = layout_with_skin(&fields(), &actions(), &vp, Skin::Flow);
+        assert_eq!(flow.fields.len(), 2);
+        assert_eq!(flow.actions.len(), 2);
+        // Flow: the two short fields sit on ONE line (same y). Form stacks them.
+        assert_eq!(
+            flow.fields[0].label_rect.y, flow.fields[1].label_rect.y,
+            "flow is inline"
+        );
+        assert_ne!(
+            form.fields[0].label_rect.y, form.fields[1].label_rect.y,
+            "form stacks rows"
+        );
+        // The value run sits right after the label run (inline document flow).
+        assert!(
+            flow.fields[0].value_rect.x
+                >= flow.fields[0].label_rect.x + flow.fields[0].label_rect.w - 0.01
+        );
+        // Hit-testing still resolves by ADDRESS in the flow skin.
+        let vr = flow.fields[1].value_rect;
+        assert_eq!(flow.hit_test(vr.x + 1.0, vr.y + 1.0), Some(Hit::Field(2)));
+        // The bare `layout` is the Form skin (back-compat).
+        assert_eq!(layout(&fields(), &actions(), &vp), form);
     }
 
     #[test]

@@ -155,6 +155,42 @@ impl core::fmt::Display for ClientError {
 
 impl std::error::Error for ClientError {}
 
+/// A nested addressed surface — a node's own resolved surface PLUS its child
+/// surfaces composed by address. This is the L1-screen / L2++-drill-down tree
+/// (charter nesting): a "screen" is just a class whose slot positions link to
+/// child node keys; composition is pure codebook-layer resolution, the wire
+/// stays a flat `NodeDelta` stream (T3), and no new widget vocabulary is
+/// introduced (T1 — a screen is a class, a slot is a linked position).
+#[derive(Debug, Clone, PartialEq)]
+pub struct NestedSurface {
+    /// This node's canonical GUID address.
+    pub key: [u8; 16],
+    /// The concept the class resolves to (the surface `data-concept`).
+    pub concept: String,
+    /// The window title / headline.
+    pub title: String,
+    /// This node's own resolved fields (the leaf surface at this level).
+    pub fields: Vec<FieldView>,
+    /// This node's ordinal-addressed actions.
+    pub actions: Vec<ActionRef>,
+    /// Child surfaces, each at the slot `position` that links to it — the
+    /// drill-down. Empty for a leaf (an interactive preset).
+    pub children: Vec<(u8, NestedSurface)>,
+}
+
+impl NestedSurface {
+    /// The depth of this subtree (a leaf preset is depth 1).
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        1 + self
+            .children
+            .iter()
+            .map(|(_, c)| c.depth())
+            .max()
+            .unwrap_or(0)
+    }
+}
+
 /// The fieldview client — holds the template codebook + per-node state, ingests
 /// down-wire frames, and renders the addressed surface locally.
 #[derive(Default)]
@@ -163,6 +199,10 @@ pub struct FieldviewClient {
     codebook: HashMap<ClassId, ClientClass>,
     /// Per-node accumulated state, keyed by the canonical GUID.
     nodes: HashMap<[u8; 16], NodeState>,
+    /// Slot links: `(parent_key, slot_position) → child_key`. A screen's slot
+    /// position resolves to a child node; this is the ONLY nesting state, and it
+    /// is pure address→address (no values, no wire change).
+    child_links: HashMap<([u8; 16], u8), [u8; 16]>,
 }
 
 impl FieldviewClient {
@@ -309,6 +349,57 @@ impl FieldviewClient {
     #[must_use]
     pub fn resolved_actions(&self, key: &[u8; 16]) -> Option<&[ActionRef]> {
         self.nodes.get(key).map(|s| s.resolved_actions.as_slice())
+    }
+
+    /// Link a child node into a parent's slot `position` — the drill-down edge
+    /// (charter nesting). A "screen" is a class whose slot positions link to
+    /// child node keys; [`resolve_nested`](FieldviewClient::resolve_nested)
+    /// composes the tree. Pure address→address: no values, no wire change.
+    pub fn link_child(&mut self, parent: [u8; 16], slot_position: u8, child: [u8; 16]) {
+        self.child_links.insert((parent, slot_position), child);
+    }
+
+    /// The child node linked at a parent's slot `position`, if any.
+    #[must_use]
+    pub fn child_at(&self, parent: &[u8; 16], slot_position: u8) -> Option<[u8; 16]> {
+        self.child_links.get(&(*parent, slot_position)).copied()
+    }
+
+    /// Compose the nested surface rooted at `key` — the L1-screen → L2++-drill-
+    /// down tree. Each node contributes its own resolved surface (leaf preset);
+    /// each slot position that has a linked child recurses. Returns `None` if
+    /// `key`'s class is unknown. Cycle-safe via `max_depth` (a linked cycle
+    /// stops descending rather than looping).
+    ///
+    /// This is pure codebook-layer composition — the wire only ever carried flat
+    /// `NodeDelta`s; nesting is a client-side walk over addresses (T1/T3 hold).
+    #[must_use]
+    pub fn resolve_nested(&self, key: &[u8; 16], max_depth: usize) -> Option<NestedSurface> {
+        let class_id = concept_of_key(key);
+        let class = self.codebook.get(&class_id)?;
+        let (fields, actions) = match self.nodes.get(key) {
+            Some(s) => (s.resolved_fields.clone(), s.resolved_actions.clone()),
+            None => (Vec::new(), Vec::new()),
+        };
+        let mut children = Vec::new();
+        if max_depth > 1 {
+            // Descend each slot position that links to a child, in field order.
+            for f in &fields {
+                if let Some(child_key) = self.child_at(key, f.position)
+                    && let Some(sub) = self.resolve_nested(&child_key, max_depth - 1)
+                {
+                    children.push((f.position, sub));
+                }
+            }
+        }
+        Some(NestedSurface {
+            key: *key,
+            concept: class.concept.clone(),
+            title: class.title.clone(),
+            fields,
+            actions,
+            children,
+        })
     }
 
     /// Build an up-wire [`ActionInvoke`](a2ui_core::ActionInvoke) frame (LE
@@ -638,6 +729,63 @@ mod tests {
         }
         // The falsifier: NO branch on the class anywhere above. A brand-new
         // synthetic ClassView flowed through the identical client + paint.
+    }
+
+    #[test]
+    fn nested_surface_composes_screen_and_drilldown() {
+        // Nesting (L1 screen / L2++ drill-down): a screen is a class whose slot
+        // position links to a child node; the tree is composed by ADDRESS from
+        // flat per-node surfaces — no wire change, no new vocabulary.
+        let mut client = FieldviewClient::new();
+        // L2 leaf preset — the invoice class (fields 0,2).
+        client.register_class(0x0102, invoice_class());
+        // L1 screen — field 0 is a SLOT that embeds the invoice child.
+        client.register_class(
+            0x0300,
+            ClientClass {
+                concept: "workspace".to_string(),
+                title: "Desktop".to_string(),
+                fields: vec![ClientField::new("Document", "embeds")],
+                actions: vec!["Close".to_string()],
+            },
+        );
+
+        let screen_key = key_for(0x0300);
+        let invoice_key = key_for(0x0102);
+        // Both nodes stream independently (flat wire).
+        client
+            .apply_node_delta(
+                &Frame::NodeDelta(NodeDelta {
+                    key: screen_key,
+                    mask_words: vec![0b1],
+                    values: vec![1],
+                })
+                .to_le_bytes(),
+            )
+            .unwrap();
+        client.apply_node_delta(&server_delta(invoice_key)).unwrap();
+        // Drill-down edge: the invoice sits in the screen's slot position 0.
+        client.link_child(screen_key, 0, invoice_key);
+
+        let tree = client
+            .resolve_nested(&screen_key, 8)
+            .expect("screen resolves");
+        assert_eq!(tree.concept, "workspace");
+        assert_eq!(tree.depth(), 2, "screen → invoice drill-down");
+        assert_eq!(tree.children.len(), 1);
+        let (slot_pos, child) = &tree.children[0];
+        assert_eq!(*slot_pos, 0, "nested at the slot position ADDRESS");
+        assert_eq!(child.concept, "commercial_document");
+        assert_eq!(
+            child.fields.iter().map(|f| f.position).collect::<Vec<_>>(),
+            vec![0, 2],
+            "child carries the invoice's own leaf surface"
+        );
+        assert_eq!(child.depth(), 1, "leaf preset");
+
+        // max_depth caps descent: depth 1 shows the screen alone.
+        let shallow = client.resolve_nested(&screen_key, 1).unwrap();
+        assert!(shallow.children.is_empty());
     }
 
     #[test]
