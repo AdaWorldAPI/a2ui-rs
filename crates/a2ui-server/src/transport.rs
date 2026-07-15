@@ -2,9 +2,10 @@
 //! by reuse, no new crypto.
 //!
 //! The session key is derived ONCE with Argon2id (`ogar-encryption`'s `kdf`,
-//! the same Argon2 that is the MedCare Tier-1 password home). Each frame is
-//! then sealed with XChaCha20-Poly1305 (`ogar-encryption`'s `aead`) under that
-//! key. The frame's own `to_le_bytes` IS the plaintext — the Firewall holds
+//! the shared forward-crypto suite `ogar-auth` also builds its password/TOTP
+//! flows on — security by reuse, consumer-agnostic). Each frame is then sealed
+//! with XChaCha20-Poly1305 (`ogar-encryption`'s `aead`) under that key. The
+//! frame's own `to_le_bytes` IS the plaintext — the Firewall holds
 //! (charter T3): we AEAD the already-LE wire bytes, we never serialize a
 //! struct to transport it.
 //!
