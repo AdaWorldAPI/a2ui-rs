@@ -26,6 +26,11 @@ ogar-encryption = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main"
 getrandom = "0.2"
 # JSON membrane (edge-only, feature `json`). NEVER on the hot path.
 serde_json = { version = "1.0", optional = true }
+# The OGAR IR type the #209 Klickwege lowering targets (ActionInvocation +
+# ActionSubject). PROMOTED dev→normal (warden contingency): lower_action_fire is
+# a plain compile-time value-construction fn, so a2ui-server (consumer) builds an
+# ALREADY-MINTED OGAR type — no IR minting here (that stays OGAR-side).
+ogar-vocab = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
 
 [features]
 default = []
@@ -35,10 +40,8 @@ default = []
 json = ["a2ui-core/serde", "dep:serde_json"]
 
 [dev-dependencies]
-# The ruff-codegen'd canonical shapes (Class + ActionDef) — the P-REHOST-lite
-# test drives render_class_with_methods_wide (the ruff-codegen DO-arm → askama
-# struct-of-methods) alongside the runtime fieldview, proving the whole path.
-ogar-vocab = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+# ogar-vocab is a normal dependency now (the #209 lowering uses it in non-test
+# builds); the P-REHOST-lite test (Class + ActionDef) shares that one source.
 # The build-time codegen arm (the ruff-codegen DO-arm → askama struct-of-methods).
 ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
 # For the test's ClassView impl (FieldRef, DisplayTemplate) — unifies with the

@@ -44,6 +44,11 @@ use a2ui_core::{ActionInvoke, Frame, mask_positions};
 use lance_graph_contract::class_view::{ClassId, WideFieldMask};
 use ogar_render_askama::{ActionRef, FieldView, render_field_view};
 
+// Re-export the addressed-surface types so a consumer (e.g. the `a2ui-paint`
+// wgpu tier) can name the resolved surface without depending on this crate's
+// internal import path. These are OGAR-owned, consumer-agnostic types.
+pub use ogar_render_askama::{ActionRef as SurfaceAction, FieldView as SurfaceField};
+
 /// The number of content-blind facet bytes a node carries (V3 le-contract §3).
 const FACET_LEN: usize = 12;
 
@@ -103,6 +108,12 @@ pub struct ClientClass {
 struct NodeState {
     facet: [u8; FACET_LEN],
     present: WideFieldMask,
+    /// The resolved addressed surface for this node — computed once per
+    /// `apply_node_delta` and stored so BOTH renderers read one surface: the
+    /// askama HTML render and the `a2ui-paint` wgpu tier consume the SAME
+    /// `&[FieldView]` / `&[ActionRef]` slice (no divergent second resolution).
+    resolved_fields: Vec<FieldView>,
+    resolved_actions: Vec<ActionRef>,
 }
 
 /// Why the client could not apply a frame or build an action.
@@ -232,8 +243,10 @@ impl FieldviewClient {
             }
         }
 
-        // Render the FULL current surface (every position received so far),
-        // resolved from the codebook.
+        // Resolve the FULL current surface (every position received so far)
+        // ONCE, from the codebook, and STORE it on the node. Both renderers
+        // read this one surface: the askama HTML render just below, and the
+        // `a2ui-paint` wgpu tier via [`resolved_fields`]/[`resolved_actions`].
         let class = &self.codebook[&class_id];
         let field_views: Vec<FieldView> = class
             .fields
@@ -258,17 +271,44 @@ impl FieldviewClient {
                 label: label.clone(),
             })
             .collect();
+        state.resolved_fields = field_views;
+        state.resolved_actions = action_refs;
 
+        // Render the askama HTML surface FROM the stored resolved surface —
+        // proving HTML and the paint tier consume the identical slice.
         let key_hex = hex16(&delta.key);
         render_field_view(
             class_id,
             &class.concept,
             &key_hex,
             &class.title,
-            &field_views,
-            &action_refs,
+            &state.resolved_fields,
+            &state.resolved_actions,
         )
         .map_err(|_| ClientError::NotANodeDelta) // askama render is infallible for well-formed input
+    }
+
+    /// The resolved addressed field surface for a node — the SAME `&[FieldView]`
+    /// the askama render consumed, exposed for a second renderer (the
+    /// `a2ui-paint` wgpu tier) to paint WITHOUT re-parsing HTML. `None` if no
+    /// delta has been applied to `key` yet.
+    ///
+    /// The fields are OGAR-owned, consumer-agnostic types; this accessor is a
+    /// plain borrowed slice — no serialization (charter T3). If `FieldView`
+    /// ever gains serde, it MUST be feature-gated exactly like `Frame`.
+    #[must_use]
+    pub fn resolved_fields(&self, key: &[u8; 16]) -> Option<&[FieldView]> {
+        self.nodes.get(key).map(|s| s.resolved_fields.as_slice())
+    }
+
+    /// The resolved ordinal-addressed action set for a node — the SAME
+    /// `&[ActionRef]` the askama render consumed, for the paint tier. `None` if
+    /// no delta has been applied to `key` yet. See [`resolved_fields`].
+    ///
+    /// [`resolved_fields`]: FieldviewClient::resolved_fields
+    #[must_use]
+    pub fn resolved_actions(&self, key: &[u8; 16]) -> Option<&[ActionRef]> {
+        self.nodes.get(key).map(|s| s.resolved_actions.as_slice())
     }
 
     /// Build an up-wire [`ActionInvoke`](a2ui_core::ActionInvoke) frame (LE
@@ -450,6 +490,39 @@ mod tests {
     }
 
     #[test]
+    fn resolved_surface_accessor_is_data_identical_to_the_render() {
+        // G6: the resolved-surface accessor exposes the SAME `&[FieldView]` /
+        // `&[ActionRef]` the askama render consumed — one resolution, two
+        // renderers (HTML here; the a2ui-paint wgpu tier via the accessor).
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0102, invoice_class());
+        let key = key_for(0x0102);
+        let html = client.apply_node_delta(&server_delta(key)).unwrap();
+
+        let fields = client.resolved_fields(&key).expect("resolved after apply");
+        let actions = client.resolved_actions(&key).expect("resolved after apply");
+
+        // Positions {0, 2} present (pos 1 was projected out server-side), 42/7.
+        let positions: Vec<u8> = fields.iter().map(|f| f.position).collect();
+        assert_eq!(positions, vec![0, 2]);
+        let values: Vec<&str> = fields.iter().map(|f| f.value.as_str()).collect();
+        assert_eq!(values, vec!["42", "7"]);
+
+        // Data-identity with the HTML: every field/action the paint tier would
+        // read is exactly what the HTML addressed.
+        for f in fields {
+            assert!(html.contains(&format!("data-field-pos=\"{}\"", f.position)));
+            assert!(html.contains(&format!(">{}<", f.value)));
+        }
+        assert_eq!(actions.len(), 2, "View + Post ordinal-addressed");
+        assert!(html.contains("data-action-ordinal=\"1\""));
+
+        // Fail-quiet: an unseen node has no resolved surface (no panic).
+        assert!(client.resolved_fields(&key_for(0x0999)).is_none());
+        assert!(client.resolved_actions(&key_for(0x0999)).is_none());
+    }
+
+    #[test]
     fn deltas_accumulate_across_frames() {
         let mut client = FieldviewClient::new();
         client.register_class(0x0102, invoice_class());
@@ -510,6 +583,61 @@ mod tests {
             }
             Frame::NodeDelta(_) => panic!("expected ActionInvoke"),
         }
+    }
+
+    /// G5 — the reusability falsifier. A SECOND, non-MedCare synthetic class
+    /// (a sensor reading, nothing like the invoice above) renders AND paints
+    /// through the IDENTICAL `FieldviewClient` + `a2ui-paint` with ZERO
+    /// client-side code change: `register_class` → `apply_node_delta` (HTML) →
+    /// `resolved_fields`/`resolved_actions` (the accessor) → `a2ui_paint::layout`
+    /// (pixels) → hit-test → up-frame. Only public API is touched.
+    #[test]
+    fn second_synthetic_consumer_renders_and_paints_unchanged() {
+        // A wholly different class — different concept id, fields, actions.
+        let sensor = ClientClass {
+            concept: "sensor_reading".to_string(),
+            title: "Sensor".to_string(),
+            fields: vec![
+                ClientField::new("Temp", "temperature_c"),
+                ClientField::new("Humidity", "humidity_pct"),
+            ],
+            actions: vec!["Calibrate".to_string()],
+        };
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0205, sensor);
+        let key = key_for(0x0205);
+
+        // RENDER (client): positions {0,1} = 21, 55.
+        let html = client
+            .apply_node_delta(
+                &Frame::NodeDelta(NodeDelta {
+                    key,
+                    mask_words: vec![0b11],
+                    values: vec![21, 55],
+                })
+                .to_le_bytes(),
+            )
+            .unwrap();
+        assert!(html.contains("data-concept=\"sensor_reading\""), "{html}");
+
+        // PAINT (via the accessor → a2ui-paint, zero client change).
+        let fields = client.resolved_fields(&key).unwrap();
+        let actions = client.resolved_actions(&key).unwrap();
+        let vp = a2ui_paint::Viewport::new(1024.0, 768.0);
+        let lay = a2ui_paint::layout(fields, actions, &vp);
+        assert_eq!(lay.fields.len(), 2);
+        assert_eq!(lay.fields[0].position, 0);
+        // A click on the "Calibrate" action (ordinal 0) → the addressed up-frame.
+        let a0 = &lay.actions[0];
+        let up = lay
+            .click_to_action_frame(key, a0.rect.x + 1.0, a0.rect.y + 1.0)
+            .expect("action hit → up-frame");
+        match Frame::from_le_bytes(&up).unwrap() {
+            Frame::ActionInvoke(ai) => assert_eq!(ai.action_ordinal, 0),
+            Frame::NodeDelta(_) => panic!("expected ActionInvoke"),
+        }
+        // The falsifier: NO branch on the class anywhere above. A brand-new
+        // synthetic ClassView flowed through the identical client + paint.
     }
 
     #[test]

@@ -49,6 +49,7 @@
 
 pub mod action_stream;
 pub mod desktop;
+pub mod lowering;
 #[cfg(feature = "json")]
 pub mod membrane;
 pub mod project;
@@ -61,6 +62,7 @@ pub use desktop::{
     ClassCodebook, ClassEntry, CodebookSnapshot, DesktopError, DesktopSession, KlickwegEdge,
     RenderedFrame,
 };
+pub use lowering::{NavWitness, lower_action_fire, lower_screen_jump};
 pub use project::{RbacError, mask_to_words, project_surface};
 pub use render_stream::{Projection, ProjectionError, project_node};
 pub use session::{Session, SessionError};
