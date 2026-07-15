@@ -111,8 +111,11 @@ Verified type receipts that survive from the audit:
 `ogar-emitter::emit_action_invocation` (`lib.rs:774`), `nav_witnessed`
 (`ogar-emitter/src/do_adapter.rs:38`).
 
-Your side stays mechanical once #209 lands: `take_klickwege()` → the lowering
-fn → typed values. Tracked owner: the MedCare/lance-graph arc. Doctrine:
+**Ownership (operator, 2026-07-14): #209 is YOURS** — the lowering is
+client-side emission, part of the reusable encrypted projected-graph client
+("ogar-rdp") that any future consumer inherits. The MedCare arc owes you one
+input only: the harvested Klickwege golden for the parity test (already
+committed, `MedCare-rs/tests/golden/nav/klickwege-digest-v2.txt`). Doctrine:
 lance-graph `.claude/knowledge/compilation-vs-runtime-substrate.md` +
 `assembler-vs-storage-substrate.md`.
 
