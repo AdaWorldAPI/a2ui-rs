@@ -24,22 +24,13 @@
 use lance_graph_contract::class_view::ClassId;
 
 use crate::desktop::KlickwegEdge;
+use crate::hex16;
 
 /// The app-scoped canonical classid for an edge: the concept in the high u16
 /// (canon-high), the app render prefix in the low u16. Pure arithmetic.
 #[must_use]
 fn canonical_classid(concept: ClassId, app_prefix: u16) -> u32 {
     ((concept as u32) << 16) | (app_prefix as u32)
-}
-
-/// Lowercase hex of a 16-byte key — the node's stable object address.
-fn hex16(key: &[u8; 16]) -> String {
-    use core::fmt::Write;
-    let mut s = String::with_capacity(32);
-    for b in key {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
 }
 
 /// Lower an **action-fire** click into an OGAR [`ActionInvocation`](ogar_vocab::ActionInvocation).

@@ -50,6 +50,7 @@ use lance_graph_contract::class_view::{ClassId, ClassView, WideFieldMask};
 use ogar_render_askama::{ActionRef, FieldView, render_field_view};
 
 use crate::action_stream::{ActionSpec, concept_of_key};
+use crate::hex16;
 use crate::project::{RbacError, mask_to_words};
 use crate::session::Session;
 
@@ -196,17 +197,6 @@ pub fn project_node<V: ClassView>(
     .map_err(|e| ProjectionError::Render(e.to_string()))?;
 
     Ok(Projection { delta, html })
-}
-
-/// Lowercase hex of a 16-byte key — the node's `data-key` address on the
-/// surface.
-fn hex16(key: &[u8; 16]) -> String {
-    use core::fmt::Write;
-    let mut s = String::with_capacity(32);
-    for b in key {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
 }
 
 #[cfg(test)]
