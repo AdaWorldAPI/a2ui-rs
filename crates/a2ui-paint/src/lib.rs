@@ -405,14 +405,39 @@ fn place_flow(fields: &[FieldView], vp: &Viewport) -> (Vec<PlacedField>, f32) {
 
 /// The GPU rasterization backend (WebGPU / WebGL2 via wgpu). OFF by default —
 /// the layout + hit-test core above is backend-agnostic and ships first; this
-/// wires the actual draw (N2 follow-up).
+/// wires the actual draw. Headless render-to-texture today (enough to prove the
+/// pipeline: buffer → shader → render pass → texture); windowed surface
+/// presentation (the only place surface `unsafe` would live — kept OUT of this
+/// `#![forbid(unsafe_code)]` crate) is a later addition.
+///
+/// The layout is already fully positioned by [`layout`]/[`layout_with_skin`];
+/// this backend only rasterizes its rects. Glyph/text raster is a follow-up (a
+/// textured quad over the same rects); the ADDRESSING (position/ordinal → rect)
+/// is what the pipeline proves.
 #[cfg(feature = "wgpu")]
 pub mod gpu {
-    use super::PaintLayout;
+    use wgpu::util::DeviceExt;
+
+    use super::{PaintLayout, Rect, Viewport};
+
+    /// Clip-space passthrough + a solid fill — every field/action rect is drawn
+    /// as filled geometry at its addressed position.
+    const SHADER: &str = r#"
+@vertex
+fn vs_main(@location(0) pos: vec2<f32>) -> @builtin(position) vec4<f32> {
+    return vec4<f32>(pos, 0.0, 1.0);
+}
+
+@fragment
+fn fs_main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.25, 0.55, 0.95, 1.0);
+}
+"#;
+
+    /// The offscreen target texture format.
+    pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
     /// The clear colour a paint surface starts from before drawing the layout.
-    /// (Placeholder anchor proving the `wgpu` feature compiles against the crate;
-    /// the full render pipeline is the N2 follow-up.)
     #[must_use]
     pub fn clear_color() -> wgpu::Color {
         wgpu::Color {
@@ -423,11 +448,201 @@ pub mod gpu {
         }
     }
 
-    /// Draw a laid-out surface with wgpu. TODO(N2): the text/rect render
-    /// pipeline. The layout is already fully positioned by [`super::layout`]; a
-    /// backend only needs to rasterize its rects + glyphs.
-    pub fn draw(_layout: &PaintLayout) {
-        // N2 follow-up: build render pass, draw field/action rects + text.
+    /// Convert every rect in a laid-out surface — each field's `label_rect` and
+    /// `value_rect`, each action's `rect` — into a clip-space (NDC) triangle
+    /// list: 6 vertices (two triangles) per rect, fields first then actions.
+    /// This is the pure geometry the GPU uploads; it is unit-tested without a
+    /// GPU so the rasterizer stays a thin consumer.
+    ///
+    /// Device pixels (top-left origin, y-down) map to NDC (`[-1, 1]`, y-up):
+    /// `ndc_x = 2·x/W − 1`, `ndc_y = 1 − 2·y/H`.
+    #[must_use]
+    pub fn to_ndc_vertices(layout: &PaintLayout, vp: &Viewport) -> Vec<[f32; 2]> {
+        let w = vp.width.max(1.0);
+        let h = vp.height.max(1.0);
+        let ndc = |x: f32, y: f32| [2.0 * x / w - 1.0, 1.0 - 2.0 * y / h];
+        let mut out = Vec::with_capacity((layout.fields.len() * 2 + layout.actions.len()) * 6);
+        let mut push = |r: &Rect| {
+            let tl = ndc(r.x, r.y);
+            let tr = ndc(r.x + r.w, r.y);
+            let bl = ndc(r.x, r.y + r.h);
+            let br = ndc(r.x + r.w, r.y + r.h);
+            // Triangle 1: TL, TR, BL. Triangle 2: TR, BR, BL.
+            out.extend_from_slice(&[tl, tr, bl, tr, br, bl]);
+        };
+        for f in &layout.fields {
+            push(&f.label_rect);
+            push(&f.value_rect);
+        }
+        for a in &layout.actions {
+            push(&a.rect);
+        }
+        out
+    }
+
+    /// Flatten clip-space vertices to native-endian bytes for the vertex-buffer
+    /// upload — no `unsafe`, so the crate's `#![forbid(unsafe_code)]` holds
+    /// (bytemuck/pointer casts are avoided for one small buffer).
+    fn vertex_bytes(verts: &[[f32; 2]]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(verts.len() * 8);
+        for v in verts {
+            bytes.extend_from_slice(&v[0].to_ne_bytes());
+            bytes.extend_from_slice(&v[1].to_ne_bytes());
+        }
+        bytes
+    }
+
+    /// A headless GPU painter: an owned device/queue + the quad-fill pipeline.
+    /// Consumes a [`PaintLayout`] (the addressed rects) and draws it into an
+    /// offscreen texture — no window, no surface.
+    pub struct GpuPainter {
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        pipeline: wgpu::RenderPipeline,
+    }
+
+    impl GpuPainter {
+        /// Create a headless painter. Returns `None` if no adapter is available
+        /// (a box with neither GPU nor software rasterizer). Accepts the
+        /// fallback adapter so it works without real hardware.
+        pub async fn new() -> Option<Self> {
+            let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::all(),
+                ..Default::default()
+            });
+            let adapter = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    force_fallback_adapter: false,
+                    compatible_surface: None,
+                })
+                .await?;
+            let (device, queue) = adapter
+                .request_device(
+                    &wgpu::DeviceDescriptor {
+                        label: Some("a2ui-paint device"),
+                        required_features: wgpu::Features::empty(),
+                        required_limits: wgpu::Limits::downlevel_defaults(),
+                        memory_hints: wgpu::MemoryHints::default(),
+                    },
+                    None,
+                )
+                .await
+                .ok()?;
+
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("a2ui-paint quad shader"),
+                source: wgpu::ShaderSource::Wgsl(SHADER.into()),
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("a2ui-paint layout"),
+                bind_group_layouts: &[],
+                push_constant_ranges: &[],
+            });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("a2ui-paint pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: "vs_main",
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &[wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x2,
+                            offset: 0,
+                            shader_location: 0,
+                        }],
+                    }],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: "fs_main",
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: TARGET_FORMAT,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview: None,
+                cache: None,
+            });
+
+            Some(Self {
+                device,
+                queue,
+                pipeline,
+            })
+        }
+
+        /// Rasterize a laid-out surface into a fresh offscreen texture sized to
+        /// the viewport, over `clear`. Returns the texture; a windowed consumer
+        /// presents it, a test consumer copies it back.
+        #[must_use]
+        pub fn render_to_texture(
+            &self,
+            layout: &PaintLayout,
+            vp: &Viewport,
+            clear: wgpu::Color,
+        ) -> wgpu::Texture {
+            let verts = to_ndc_vertices(layout, vp);
+            let bytes = vertex_bytes(&verts);
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("a2ui-paint vertices"),
+                    contents: &bytes,
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+
+            let target = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("a2ui-paint target"),
+                size: wgpu::Extent3d {
+                    width: vp.width.max(1.0) as u32,
+                    height: vp.height.max(1.0) as u32,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: TARGET_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let view = target.create_view(&wgpu::TextureViewDescriptor::default());
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("a2ui-paint encoder"),
+                });
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("a2ui-paint pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(clear),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                pass.set_pipeline(&self.pipeline);
+                pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+                pass.draw(0..(verts.len() as u32), 0..1);
+            }
+            self.queue.submit(std::iter::once(encoder.finish()));
+            target
+        }
     }
 }
 
@@ -565,5 +780,25 @@ mod tests {
         let lay = layout(&[], &[], &vp);
         assert!(lay.fields.is_empty() && lay.actions.is_empty());
         assert_eq!(lay.hit_test(10.0, 10.0), None);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[test]
+    fn ndc_vertices_are_six_per_rect_in_clip_space() {
+        // The GPU backend's geometry is pure (no device needed): every rect the
+        // layout placed becomes two triangles = 6 clip-space vertices.
+        let vp = Viewport::new(1000.0, 800.0);
+        let lay = layout(&fields(), &actions(), &vp);
+        let verts = gpu::to_ndc_vertices(&lay, &vp);
+        // Each field contributes label_rect + value_rect; each action one rect.
+        let rects = lay.fields.len() * 2 + lay.actions.len();
+        assert_eq!(verts.len(), rects * 6, "6 vertices per placed rect");
+        // Everything the layout placed inside the viewport maps into the clip cube.
+        for v in &verts {
+            assert!(
+                (-1.0..=1.0).contains(&v[0]) && (-1.0..=1.0).contains(&v[1]),
+                "vertex {v:?} outside NDC"
+            );
+        }
     }
 }
