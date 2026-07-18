@@ -28,3 +28,8 @@ default = []
 # The GPU rasterization backend (WebGPU / WebGL2). The layout + hit-test core is
 # backend-agnostic; this feature wires the actual draw. See `gpu` module.
 wgpu = ["dep:wgpu"]
+
+[dev-dependencies]
+# Test-only minimal async block-on for the PROBE-GPU-LUT gpu-exec leg
+# (adapter-guarded; only exercised under `--features wgpu`). Zero transitive deps.
+pollster = "0.3"

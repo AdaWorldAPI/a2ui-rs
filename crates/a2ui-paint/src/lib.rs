@@ -647,6 +647,9 @@ fn fs_main() -> @location(0) vec4<f32> {
 }
 
 #[cfg(test)]
+mod gpu_lut_probe;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
