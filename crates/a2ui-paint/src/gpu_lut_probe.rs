@@ -17,12 +17,21 @@
 //!
 //! - **GPU-exec** (`feature = "wgpu"`, adapter-guarded): uploads the LUT as an
 //!   `R16Uint` texture, renders a 256×256 `R32Uint` target whose every texel is
-//!   the fetched distance (a WebGL2-valid fragment-shader GPGPU pass mirroring
-//!   the crate's render-to-texture harness), reads it back, and asserts
-//!   FULL-TABLE parity (`readback[i] == lut[i]`). It **skips green** where no
-//!   adapter is present (a headless box with neither GPU nor a software
-//!   rasterizer), so it never reds a headless CI; it runs wherever a
-//!   WebGPU/WebGL2 adapter exists (lavapipe CI, a browser).
+//!   the fetched distance (a fragment-shader GPGPU pass mirroring the crate's
+//!   render-to-texture harness), reads it back, and asserts FULL-TABLE parity
+//!   (`readback[i] == lut[i]`). It **skips green** where no adapter is present
+//!   (a headless box with neither GPU nor a software rasterizer), so it never
+//!   reds a headless CI.
+//!
+//!   **Backend scope (headless):** this probe requests a **surface-less**
+//!   adapter, so it validates on **WebGPU** (native or browser) + **native /
+//!   software GL** (lavapipe CI). The WGSL is **WebGL2-compatible** — integer
+//!   sampled texture + `textureLoad` + integer render target are all GLES3-core
+//!   — but wgpu's WebGL backend REQUIRES a canvas-bound `compatible_surface`
+//!   (`RequestAdapterOptions`), so the wasm32 **WebGL2** backend needs a
+//!   surface-bound harness and is OUT OF SCOPE for this headless probe (see the
+//!   `compatible_surface` note in `GpuLut::new`). "WebGL2" here is a
+//!   shader-surface property, not a validated execution backend of this probe.
 //!
 //! No bgz17 dependency: this is a HARNESS-CAPABILITY probe (can our real wgpu
 //! seam carry + gather the materialized table at all), not a bgz17 integration.
@@ -165,6 +174,11 @@ mod gpu_exec {
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::LowPower,
                     force_fallback_adapter: false,
+                    // Headless: no surface. Reaches WebGPU + native/software GL
+                    // (lavapipe) adapters. wgpu's WebGL backend REQUIRES a
+                    // canvas-bound compatible_surface, so the wasm32 WebGL2 path
+                    // needs a surface-bound harness — out of scope for this
+                    // headless probe (the WGSL itself stays WebGL2-compatible).
                     compatible_surface: None,
                 })
                 .await?;
@@ -383,8 +397,9 @@ fn probe_gpu_lut_gpu_exec_full_table_parity() {
     let lut = build_lut(0x9E37_79B9_7F4A_7C15);
     let Some(gpu) = pollster::block_on(gpu_exec::GpuLut::new()) else {
         eprintln!(
-            "PROBE-GPU-LUT gpu-exec: SKIP — no wgpu adapter in this environment \
-             (the parity runs wherever a WebGPU/WebGL2 adapter exists)"
+            "PROBE-GPU-LUT gpu-exec: SKIP — no surface-less wgpu adapter in this \
+             environment (the parity runs wherever a WebGPU or native/software-GL \
+             adapter exists — lavapipe CI / browser WebGPU)"
         );
         return;
     };
