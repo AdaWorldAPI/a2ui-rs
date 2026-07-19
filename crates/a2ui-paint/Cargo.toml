@@ -22,14 +22,15 @@ a2ui-core = { path = "../a2ui-core" }
 # WebGPU + WebGL2, so one crate covers both browser targets. (N2 follow-up: the
 # full pipeline; the DATA path is what ships first.)
 wgpu = { version = "22", optional = true }
+fontdue = { version = "0.9.3", optional = true }
+png = { version = "0.18.1", optional = true }
 
 [features]
 default = []
 # The GPU rasterization backend (WebGPU / WebGL2). The layout + hit-test core is
 # backend-agnostic; this feature wires the actual draw. See `gpu` module.
 wgpu = ["dep:wgpu"]
-
-[dev-dependencies]
-# Test-only minimal async block-on for the PROBE-GPU-LUT gpu-exec leg
-# (adapter-guarded; only exercised under `--features wgpu`). Zero transitive deps.
-pollster = "0.3"
+# Headless CPU rasterizer: PaintLayout -> PNG (rects + real glyphs via an
+# embedded DejaVu font). The THIRD renderer of the one surface (HTML / GPU / PNG),
+# for checking screens with no display. Pure-Rust deps; crate stays forbid-unsafe.
+raster = ["dep:fontdue", "dep:png"]

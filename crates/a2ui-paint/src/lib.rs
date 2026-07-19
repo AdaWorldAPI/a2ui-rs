@@ -33,6 +33,11 @@
 
 use ogar_render_askama::{ActionRef, FieldView};
 
+/// Headless CPU rasterizer: `PaintLayout` → PNG (rects + real glyphs). The third
+/// renderer of the one surface — for checking screens with no GPU/display.
+#[cfg(feature = "raster")]
+pub mod raster;
+
 /// A rectangle in surface pixels: top-left `(x, y)`, size `(w, h)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
@@ -645,9 +650,6 @@ fn fs_main() -> @location(0) vec4<f32> {
         }
     }
 }
-
-#[cfg(test)]
-mod gpu_lut_probe;
 
 #[cfg(test)]
 mod tests {
