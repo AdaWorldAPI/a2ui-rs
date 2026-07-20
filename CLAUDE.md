@@ -56,42 +56,6 @@ open W1 decision. **Fail-closed:** a missing/narrow role mask never falls back
 to "emit everything" (`full_for` is a *render* convenience, never an RBAC
 fallback). RBAC happens BEFORE framing — the frame is dumb transport.
 
-## DocIr composition grounding (OGAR #217 / #218)
-
-The DocIr composition ruling (`AdaWorldAPI/OGAR docs/DOCIR-COMPOSITION-LAYER.md`
-#217, grounded in `docs/DOCIR-COMPOSITION-GROUNDING.md` #218) is **this arc,
-generalized — not a competing surface.** a2ui-rs is already the code proof:
-`render_stream.rs` says *"one template projection; serve it as a living screen
-or re-issue it as a document."* Ground rules that follow, so a future session
-absorbs the OGAR-side widenings correctly (they are **expansions, not
-rewrites**):
-
-- **a2ui is `DocRenderer`'s fourth adapter.** A3: *"a screen and a document are
-  the SAME positional projection; `DocRenderer` gains its fourth adapter."* The
-  live surface (this repo) sits beside askama / Typst / the paged renderers on
-  one `DocRenderer` trait — do NOT mint a parallel renderer trait. When OGAR
-  renames the doctrine's `ProjectionRenderer` to `DocRenderer`, this repo
-  consumes that trait.
-- **The `FieldView` we consume is a fold, being widened.** `render_field_view`'s
-  `FieldView` (the `ogar-render-askama` struct: `position/label/predicate/value`)
-  is the **`Text`-leaf reading** of the `E-ONE-MASK-THREE-PORTS` fieldview fold.
-  OGAR is widening it to a renderer-neutral `enum FieldView {Text, Badge, Table,
-  ObjectSlot, Geometry, …}` (the struct becomes `FieldRow`, the `Text` payload).
-  When that lands upstream, `a2ui-wasm` / `a2ui-server` / `a2ui-paint` consume
-  the **enum's fold** — the widget-per-field-type dispatch the paint tier
-  already does by hand (`Skin{Form,Flow}`) becomes the enum's variant match. **T1
-  holds:** the enum variants are render *skins* (the fold), never a second
-  closed doc-IR vocabulary beside `RegionKind`.
-- **`ObjectSlot` = our nested-ClassView addressing, made explicit.** The
-  `resolve_nested` L1/L2 drill-down (`a2ui-wasm`) is the ObjectSlot portal:
-  `desktop → window → region → widget` is `ObjectSlot{target, class_view,
-  wide_field_mask}` recursion (the A3 Klickwege brick + an `ObjectRef` +
-  `ResolutionMode`). Behavior still travels by address (T2); the portal carries
-  a projection, never an inline handler.
-- **No code change here yet** — the composition types are OGAR-side named gaps.
-  This section is the seam record so the widening is a rename-follow, not a
-  re-derivation.
-
 ## Layout + status
 
 | crate | role | status |
