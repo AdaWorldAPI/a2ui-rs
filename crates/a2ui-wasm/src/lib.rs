@@ -833,6 +833,85 @@ mod tests {
         // synthetic ClassView flowed through the identical client + paint.
     }
 
+    /// **W3's gate.** One row set renders under four skins with **no ABI
+    /// change and no second vocabulary** — which is what makes a skin a
+    /// projection rather than a format.
+    ///
+    /// The two skins the block-editor arc actually names are both here:
+    /// `Grid { cols: 1 }` is the PowerAutomate-shaped vertical step list, and
+    /// `Grid { cols: 4 }` is the block canvas. They are the SAME variant with
+    /// a different column count, which is the strongest form of the T1
+    /// discipline available — a new surface did not even need a new skin.
+    #[test]
+    fn one_row_set_renders_under_four_skins_with_no_abi_delta() {
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0102, invoice_class());
+        let key = key_for(0x0102);
+        client.apply_node_delta(&server_delta(key)).unwrap();
+
+        // The ABI bytes, captured BEFORE any rendering happens.
+        let before = client.facet(&key).unwrap();
+
+        let fields = client.resolved_fields(&key).unwrap().to_vec();
+        let actions = client.resolved_actions(&key).unwrap().to_vec();
+        let vp = a2ui_paint::Viewport::new(1024.0, 768.0);
+        let skins = [
+            a2ui_paint::Skin::Form,
+            a2ui_paint::Skin::Flow,
+            a2ui_paint::Skin::Grid { cols: 1 }, // PowerAutomate-shaped
+            a2ui_paint::Skin::Grid { cols: 4 }, // block canvas
+        ];
+
+        let mut geometries = Vec::new();
+        for skin in skins {
+            let lay = a2ui_paint::layout_with_skin(&fields, &actions, &vp, skin);
+            // Same rows, same ADDRESSES, under every skin. If a skin dropped
+            // or renumbered a field it would not be a projection.
+            assert_eq!(
+                lay.fields.len(),
+                fields.len(),
+                "{skin:?} changed the row set"
+            );
+            assert_eq!(
+                lay.fields.iter().map(|f| f.position).collect::<Vec<_>>(),
+                fields.iter().map(|f| f.position).collect::<Vec<_>>(),
+                "{skin:?} changed the field addresses"
+            );
+            assert_eq!(
+                lay.actions.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+                actions.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+                "{skin:?} changed the action ordinals"
+            );
+            geometries.push(
+                lay.fields
+                    .iter()
+                    .map(|f| (f.label_rect.x, f.label_rect.y))
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        // …and the ABI is byte-identical afterwards. Rendering is a read.
+        assert_eq!(
+            client.facet(&key).unwrap(),
+            before,
+            "a render touched the ABI"
+        );
+
+        // ANTI-VACUITY, and the half that makes this test worth having: the
+        // skins must actually DIFFER in geometry. Four skins that all produced
+        // the same rects would satisfy every assertion above while proving
+        // nothing — "one surface, many skins" would collapse to "one skin".
+        for (i, a) in geometries.iter().enumerate() {
+            for (j, b) in geometries.iter().enumerate().skip(i + 1) {
+                assert_ne!(
+                    a, b,
+                    "skins {:?} and {:?} produced identical geometry",
+                    skins[i], skins[j]
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_palette_offers_codebook_titles_at_ordinals_and_a_pick_is_an_address() {
         // The palette is offered-but-not-linked. Two classes so ordinal 0 is
