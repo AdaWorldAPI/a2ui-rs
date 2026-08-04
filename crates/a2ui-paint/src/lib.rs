@@ -125,8 +125,26 @@ pub enum Skin {
     /// the viewport width (the Word/prose projection). The first step toward the
     /// projectional document editor.
     Flow,
-    // Future skins (each a renderer of the same surface): Grid (spreadsheet),
-    // Spatial (CAD), Graph (native). See projectional-knowledge-editor-v1.md.
+    /// The grid skin — `position` read as a **row-major cell address** over
+    /// `cols` columns.
+    ///
+    /// This is the first skin where `position` is genuinely a coordinate.
+    /// [`Skin::Form`] and [`Skin::Flow`] place by ITERATION ORDER and copy
+    /// `position` through only so hit-test can round-trip it; a gap in the
+    /// position sequence moves nothing. Here a gap leaves a cell empty, which
+    /// is the whole difference and is what the falsifier tests.
+    ///
+    /// `cols` lives on the variant rather than on [`Viewport`] because the
+    /// viewport is device geometry while the column count is a projection
+    /// choice — keeping it here preserves the purity contract of
+    /// [`layout_with_skin`] (same inputs → same layout).
+    Grid {
+        /// Columns per row. Clamped to at least 1 — a zero would otherwise be
+        /// a division by zero rather than a sensible degenerate case.
+        cols: u8,
+    },
+    // Future skins (each a renderer of the same surface): Spatial (CAD),
+    // Graph (native). See projectional-knowledge-editor-v1.md.
 }
 
 /// A field placed in the layout — its address (`position`) + where its label and
@@ -273,6 +291,7 @@ pub fn layout_with_skin(
     let (placed_fields, mut y) = match skin {
         Skin::Form => place_form(fields, vp),
         Skin::Flow => place_flow(fields, vp),
+        Skin::Grid { cols } => place_grid(fields, vp, cols),
     };
 
     // The action button row, below the fields, laid left-to-right (wrapping to a
@@ -405,6 +424,69 @@ fn place_flow(fields: &[FieldView], vp: &Viewport) -> (Vec<PlacedField>, f32) {
         x += run_w + GAP;
     }
     let after = if placed.is_empty() { PAD } else { y + line_h };
+    (placed, after)
+}
+
+/// The cell a position addresses, row-major over `cols` columns.
+///
+/// `cols == 0` is clamped to 1 rather than panicking: `Skin` is public and
+/// `Copy`, so a zero is reachable from any caller, and a one-column layout is
+/// the sensible degenerate reading of "no columns fit".
+const fn cell_of(position: u8, cols: u8) -> (u16, u8) {
+    let c = if cols == 0 { 1 } else { cols };
+    ((position / c) as u16, position % c)
+}
+
+/// Place fields by ADDRESS: `position` → `(row, col)` → rect.
+///
+/// No iteration counter appears anywhere below — that is what distinguishes
+/// this from [`place_form`] / [`place_flow`], and a gap in the position
+/// sequence therefore leaves a cell empty instead of closing up.
+///
+/// Two fields sharing a `position` cannot arrive from `apply_node_delta`
+/// (mask positions are strictly ascending), but this function is public and
+/// takes an arbitrary slice. Duplicates are placed at the same rect and BOTH
+/// are kept; `hit_test`'s first-match-wins then resolves to the first. That is
+/// documented rather than "fixed", because rejecting duplicates would refuse
+/// input the other two skins accept.
+fn place_grid(fields: &[FieldView], vp: &Viewport, cols: u8) -> (Vec<PlacedField>, f32) {
+    let c = if cols == 0 { 1 } else { cols };
+    let cf = f32::from(c);
+    let cell_w = ((vp.width - 2.0 * PAD - (cf - 1.0) * GAP) / cf).max(1.0);
+    let cell_h = DESKTOP_ROW_H;
+    let mut placed = Vec::with_capacity(fields.len());
+    let mut max_row: u16 = 0;
+    for f in fields {
+        let (row, col) = cell_of(f.position, c);
+        max_row = max_row.max(row);
+        let x = PAD + f32::from(col) * (cell_w + GAP);
+        let y = PAD + f32::from(row) * (cell_h + GAP);
+        // Label above value inside the cell, so a cell is one addressable tile
+        // rather than two side-by-side columns (which is `Form`'s reading).
+        let half = cell_h / 2.0;
+        placed.push(PlacedField {
+            position: f.position,
+            label: f.label.clone(),
+            value: f.value.clone(),
+            label_rect: Rect {
+                x,
+                y,
+                w: cell_w,
+                h: half,
+            },
+            value_rect: Rect {
+                x,
+                y: y + half,
+                w: cell_w,
+                h: half,
+            },
+        });
+    }
+    let after = if placed.is_empty() {
+        PAD
+    } else {
+        PAD + f32::from(max_row + 1) * (cell_h + GAP)
+    };
     (placed, after)
 }
 
@@ -785,6 +867,125 @@ mod tests {
         let lay = layout(&[], &[], &vp);
         assert!(lay.fields.is_empty() && lay.actions.is_empty());
         assert_eq!(lay.hit_test(10.0, 10.0), None);
+    }
+
+    /// Three tiles at positions **0, 1, 3** over 2 columns.
+    ///
+    /// The gap at position 2 is the entire point: with contiguous positions,
+    /// address-driven and order-driven placement coincide and the test would
+    /// pass with `place_flow` substituted. Here position 3 must land in
+    /// **column 1** of row 1, because it is an address — an order-driven
+    /// placer would put the third *iterated* field at column 0.
+    #[test]
+    fn grid_places_by_address_so_a_position_gap_leaves_its_cell_empty() {
+        let tiles = vec![
+            FieldView {
+                position: 0,
+                label: "A".into(),
+                predicate: "a".into(),
+                value: "1".into(),
+            },
+            FieldView {
+                position: 1,
+                label: "B".into(),
+                predicate: "b".into(),
+                value: "2".into(),
+            },
+            FieldView {
+                position: 3,
+                label: "D".into(),
+                predicate: "d".into(),
+                value: "4".into(),
+            },
+        ];
+        let vp = Viewport::new(1000.0, 800.0);
+        let lay = layout_with_skin(&tiles, &[], &vp, Skin::Grid { cols: 2 });
+        let at = |p: u8| {
+            lay.fields
+                .iter()
+                .find(|f| f.position == p)
+                .unwrap_or_else(|| panic!("position {p} was not placed"))
+        };
+
+        // 0 and 1 share a row.
+        assert_eq!(at(0).label_rect.y, at(1).label_rect.y);
+        // 3 is on the NEXT row…
+        assert!(at(3).label_rect.y > at(0).label_rect.y);
+        // …and in column 1, NOT column 0. This is the assertion an
+        // order-driven placer fails: it would place the third field it
+        // iterated at the start of the row.
+        assert_eq!(at(3).label_rect.x, at(1).label_rect.x);
+        assert!(at(3).label_rect.x > at(0).label_rect.x);
+    }
+
+    #[test]
+    fn grid_honours_its_column_count_and_is_safe_at_zero() {
+        let tiles: Vec<FieldView> = (0..4)
+            .map(|i| FieldView {
+                position: i,
+                label: format!("F{i}"),
+                predicate: "p".into(),
+                value: "v".into(),
+            })
+            .collect();
+        let vp = Viewport::new(1000.0, 800.0);
+
+        // One column: every tile on its own row, matching Form's one-per-row
+        // reading. An implementation that ignored `cols` and hardcoded a width
+        // fails here.
+        let one = layout_with_skin(&tiles, &[], &vp, Skin::Grid { cols: 1 });
+        let ys: Vec<f32> = one.fields.iter().map(|f| f.label_rect.y).collect();
+        assert!(ys.windows(2).all(|w| w[1] > w[0]), "cols=1 must stack");
+        assert!(
+            one.fields
+                .iter()
+                .all(|f| f.label_rect.x == one.fields[0].label_rect.x)
+        );
+
+        // Four columns: all four on ONE row. Two-sided against the above — a
+        // placer that always stacked would pass the first half alone.
+        let four = layout_with_skin(&tiles, &[], &vp, Skin::Grid { cols: 4 });
+        let y0 = four.fields[0].label_rect.y;
+        assert!(
+            four.fields.iter().all(|f| f.label_rect.y == y0),
+            "cols=4 must be one row"
+        );
+        // …and the columns are genuinely distinct, not stacked at one x.
+        let xs: Vec<f32> = four.fields.iter().map(|f| f.label_rect.x).collect();
+        assert!(xs.windows(2).all(|w| w[1] > w[0]));
+
+        // cols = 0 degenerates to one column rather than dividing by zero.
+        let zero = layout_with_skin(&tiles, &[], &vp, Skin::Grid { cols: 0 });
+        assert_eq!(zero.fields.len(), 4);
+        assert!(zero.fields.iter().all(|f| f.label_rect.w.is_finite()));
+        assert_eq!(
+            zero.fields
+                .iter()
+                .map(|f| f.label_rect.y)
+                .collect::<Vec<_>>(),
+            ys,
+            "cols=0 must read as cols=1"
+        );
+    }
+
+    #[test]
+    fn a_grid_click_still_resolves_to_an_ordinal_address() {
+        // T2 by construction: Grid writes the real `position` into
+        // `PlacedField.position` like every other placer, so `hit_test` and
+        // `click_to_action_frame` are UNCHANGED and the address path cannot
+        // diverge. This asserts that rather than assuming it.
+        let vp = Viewport::new(1000.0, 800.0);
+        let lay = layout_with_skin(&fields(), &actions(), &vp, Skin::Grid { cols: 2 });
+        let a = &lay.actions[1];
+        let hit = lay.hit_test(a.rect.x + 1.0, a.rect.y + 1.0);
+        assert_eq!(hit, Some(Hit::Action(1)));
+        // A field cell hit-tests to its ADDRESS, and position 2 is the field's
+        // own position — not its index in the slice.
+        let f = lay.fields.iter().find(|f| f.position == 2).unwrap();
+        assert_eq!(
+            lay.hit_test(f.label_rect.x + 1.0, f.label_rect.y + 1.0),
+            Some(Hit::Field(2))
+        );
     }
 
     #[cfg(feature = "wgpu")]

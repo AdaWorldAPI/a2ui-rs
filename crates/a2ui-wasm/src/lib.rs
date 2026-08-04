@@ -101,6 +101,20 @@ pub struct ClientClass {
     pub actions: Vec<String>,
 }
 
+/// A class a slot will accept, with the placement action's server-declared
+/// ordinal.
+///
+/// The ordinal is carried rather than derived because the up-wire path
+/// resolves it against the PARENT class's `ActionDef` list; see
+/// [`FieldviewClient::offer_class`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OfferedClass {
+    /// The class the slot will accept.
+    pub class_id: ClassId,
+    /// The parent's placement-action ordinal for this class.
+    pub action_ordinal: u32,
+}
+
 /// The accumulated client-side state of one addressed node: its facet bytes and
 /// which positions have been received (so a full render shows everything seen
 /// so far, while a delta only repaints its own positions).
@@ -135,6 +149,23 @@ pub enum ClientError {
         /// Value bytes actually present.
         have: usize,
     },
+    /// A `NodeDelta` carried a mask position outside the addressable surface.
+    ///
+    /// The wire is already wide-native — `mask_words: Vec<u64>` round-trips
+    /// positions far past one facet — so a frame naming position 64 is
+    /// **well-formed at the frame layer** and only becomes unrenderable here.
+    /// Refused rather than skipped: skipping consumed no value byte and raised
+    /// no error, so a sender's field silently vanished while the frame
+    /// reported success. That is the one asymmetry worth naming — the loop
+    /// already failed loud on [`ValueUnderrun`](Self::ValueUnderrun), the
+    /// under-supply side of the very same iteration, and was silent on the
+    /// over-range side.
+    PositionOutOfRange {
+        /// The mask position the frame declared.
+        position: u32,
+        /// The first position this client cannot address.
+        limit: usize,
+    },
 }
 
 impl core::fmt::Display for ClientError {
@@ -147,6 +178,13 @@ impl core::fmt::Display for ClientError {
                 write!(
                     f,
                     "NodeDelta value underrun: need {need} bytes, have {have}"
+                )
+            }
+            Self::PositionOutOfRange { position, limit } => {
+                write!(
+                    f,
+                    "NodeDelta names position {position}, past this client's \
+                     addressable limit of {limit}"
                 )
             }
         }
@@ -203,6 +241,21 @@ pub struct FieldviewClient {
     /// position resolves to a child node; this is the ONLY nesting state, and it
     /// is pure address→address (no values, no wire change).
     child_links: HashMap<([u8; 16], u8), [u8; 16]>,
+    /// Offerable classes: `(parent_key, slot_position) → candidate class ids`.
+    ///
+    /// The **palette** — what a slot will accept but does not yet hold. Pure
+    /// address→class: no values, no captions, no widget kind, no wire change.
+    ///
+    /// This is the structural twin of [`child_links`](Self::child_links), and
+    /// the pair is the whole palette/canvas distinction with no third concept:
+    /// **available = offered but not linked; placed = linked.**
+    ///
+    /// It cannot mint a second vocabulary (T1) because a tile's identity is a
+    /// `ClassId` — a key into the codebook that already exists — and its
+    /// caption is read from `ClientClass.title`, i.e. from the ClassView
+    /// registry. Delete this map and no information is lost that the codebook
+    /// does not already hold.
+    offerable: HashMap<([u8; 16], u8), Vec<OfferedClass>>,
 }
 
 impl FieldviewClient {
@@ -257,30 +310,46 @@ impl FieldviewClient {
         // Apply the masked, facet-backed values to the node's accumulated state.
         // Positions come out ascending (mask_positions), matching the wire's
         // ascending value order.
-        let state = self.nodes.entry(delta.key).or_default();
+        // VALIDATE FULLY BEFORE MUTATING. Both refusals below used to be
+        // raised mid-loop, after earlier positions had already been written
+        // into `state` — so a refused frame still changed cached node state,
+        // and a later valid delta could make that value visible. The doc on
+        // `ValueUnderrun` promised "never a partial apply" while the code did
+        // exactly that; this is what makes the promise true.
+        //
+        // Collecting first is affordable: a mask names at most `FACET_LEN`
+        // addressable positions, so the vector is bounded by the surface, not
+        // by the frame.
+        let mut staged: Vec<(u8, u8)> = Vec::new();
         let mut value_iter = delta.values.iter();
-        let mut consumed = 0usize;
-        let mut needed = 0usize;
-        for pos in mask_positions(&delta.mask_words) {
-            if (pos as usize) < FACET_LEN {
-                needed += 1;
-                match value_iter.next() {
-                    Some(&b) => {
-                        let p = pos as u8;
-                        state.facet[pos as usize] = b;
-                        // `WideFieldMask::with` consumes self (not Copy) — take
-                        // it out of the &mut field, promote, put it back.
-                        state.present = std::mem::take(&mut state.present).with(p);
-                        consumed += 1;
-                    }
-                    None => {
-                        return Err(ClientError::ValueUnderrun {
-                            need: needed,
-                            have: consumed,
-                        });
-                    }
-                }
+        for (i, pos) in mask_positions(&delta.mask_words).enumerate() {
+            // Out of range is a REFUSAL, not a skip. The old `if <` with no
+            // `else` consumed no value byte and raised no error, so a field the
+            // sender declared simply disappeared while `apply` returned Ok.
+            if (pos as usize) >= FACET_LEN {
+                return Err(ClientError::PositionOutOfRange {
+                    position: pos,
+                    limit: FACET_LEN,
+                });
             }
+            // Every in-range position needs one byte, so the count is the
+            // index — a hand-rolled counter would be redundant.
+            let Some(&b) = value_iter.next() else {
+                return Err(ClientError::ValueUnderrun {
+                    need: i + 1,
+                    have: staged.len(),
+                });
+            };
+            staged.push((pos as u8, b));
+        }
+
+        // Only now is the frame known good, so the write cannot be partial.
+        let state = self.nodes.entry(delta.key).or_default();
+        for (pos, b) in staged {
+            state.facet[usize::from(pos)] = b;
+            // `WideFieldMask::with` consumes self (not Copy) — take it out of
+            // the &mut field, promote, put it back.
+            state.present = std::mem::take(&mut state.present).with(pos);
         }
 
         // Resolve the FULL current surface (every position received so far)
@@ -363,6 +432,79 @@ impl FieldviewClient {
     #[must_use]
     pub fn child_at(&self, parent: &[u8; 16], slot_position: u8) -> Option<[u8; 16]> {
         self.child_links.get(&(*parent, slot_position)).copied()
+    }
+
+    /// Offer a class into a parent's slot — "this slot will accept one of
+    /// these." Offering is **not** placing; see [`palette_surface`].
+    ///
+    /// `action_ordinal` is the **server-declared** ordinal of the placement
+    /// action on the PARENT class, and the client must be told it rather than
+    /// deriving it. The up-wire path resolves an `ActionInvoke` by indexing
+    /// the parent class's own `ActionDef` list
+    /// (`a2ui_server::action_stream::resolve_action`), so an ordinal invented
+    /// from the offer's position in this map would fire an unrelated parent
+    /// action — or be refused as out of range — whenever the placement actions
+    /// are not laid out as exactly `0..N` in offer order.
+    ///
+    /// Duplicate offers of the same class at the same slot are ignored, so a
+    /// re-sync cannot silently double the palette.
+    ///
+    /// [`palette_surface`]: Self::palette_surface
+    pub fn offer_class(
+        &mut self,
+        parent: [u8; 16],
+        slot_position: u8,
+        class_id: ClassId,
+        action_ordinal: u32,
+    ) {
+        let slot = self.offerable.entry((parent, slot_position)).or_default();
+        if !slot.iter().any(|o| o.class_id == class_id) {
+            slot.push(OfferedClass {
+                class_id,
+                action_ordinal,
+            });
+        }
+    }
+
+    /// The classes offerable at a parent's slot, in offer order.
+    #[must_use]
+    pub fn offered_at(&self, parent: &[u8; 16], slot_position: u8) -> &[OfferedClass] {
+        self.offerable
+            .get(&(*parent, slot_position))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The **palette surface** for a slot: one [`ActionRef`] per offerable
+    /// class, carrying the **server-declared** placement ordinal.
+    ///
+    /// Picking a tile is therefore an ordinary `ActionInvoke` at that ordinal —
+    /// the same vocabulary every other behaviour already travels in (T2). There
+    /// is no `PlaceBlock` frame, no new `Frame` variant, and no wire change
+    /// (T3): a pick is an ADDRESS, never data describing a widget.
+    ///
+    /// Captions come from `ClientClass.title` — the codebook, the font of the
+    /// desktop — so the palette stores addresses and reads names, rather than
+    /// carrying names of its own (T1). A class that is offered but not in the
+    /// codebook is **skipped**: the client cannot render a template it has not
+    /// synced, and inventing a caption for it would be exactly the second
+    /// vocabulary this design exists to avoid.
+    ///
+    /// The paint tier receives this through the existing action path and
+    /// cannot tell a palette from a button row — which is the property that
+    /// keeps `a2ui-paint` free of the word "palette" entirely.
+    #[must_use]
+    pub fn palette_surface(&self, parent: &[u8; 16], slot_position: u8) -> Vec<ActionRef> {
+        self.offered_at(parent, slot_position)
+            .iter()
+            .filter_map(|o| {
+                self.codebook.get(&o.class_id).map(|c| ActionRef {
+                    // The DECLARED ordinal, never this offer's index — the
+                    // server resolves it against the parent's ActionDef list.
+                    ordinal: o.action_ordinal,
+                    label: c.title.clone(),
+                })
+            })
+            .collect()
     }
 
     /// Compose the nested surface rooted at `key` — the L1-screen → L2++-drill-
@@ -731,6 +873,156 @@ mod tests {
         // synthetic ClassView flowed through the identical client + paint.
     }
 
+    /// **W3's gate.** One row set renders under four skins with **no ABI
+    /// change and no second vocabulary** — which is what makes a skin a
+    /// projection rather than a format.
+    ///
+    /// The two skins the block-editor arc actually names are both here:
+    /// `Grid { cols: 1 }` is the PowerAutomate-shaped vertical step list, and
+    /// `Grid { cols: 4 }` is the block canvas. They are the SAME variant with
+    /// a different column count, which is the strongest form of the T1
+    /// discipline available — a new surface did not even need a new skin.
+    #[test]
+    fn one_row_set_renders_under_four_skins_with_no_abi_delta() {
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0102, invoice_class());
+        let key = key_for(0x0102);
+        client.apply_node_delta(&server_delta(key)).unwrap();
+
+        // The ABI bytes, captured BEFORE any rendering happens.
+        let before = client.facet(&key).unwrap();
+
+        let fields = client.resolved_fields(&key).unwrap().to_vec();
+        let actions = client.resolved_actions(&key).unwrap().to_vec();
+        let vp = a2ui_paint::Viewport::new(1024.0, 768.0);
+        let skins = [
+            a2ui_paint::Skin::Form,
+            a2ui_paint::Skin::Flow,
+            a2ui_paint::Skin::Grid { cols: 1 }, // PowerAutomate-shaped
+            a2ui_paint::Skin::Grid { cols: 4 }, // block canvas
+        ];
+
+        let mut geometries = Vec::new();
+        for skin in skins {
+            let lay = a2ui_paint::layout_with_skin(&fields, &actions, &vp, skin);
+            // Same rows, same ADDRESSES, under every skin. If a skin dropped
+            // or renumbered a field it would not be a projection.
+            assert_eq!(
+                lay.fields.len(),
+                fields.len(),
+                "{skin:?} changed the row set"
+            );
+            assert_eq!(
+                lay.fields.iter().map(|f| f.position).collect::<Vec<_>>(),
+                fields.iter().map(|f| f.position).collect::<Vec<_>>(),
+                "{skin:?} changed the field addresses"
+            );
+            assert_eq!(
+                lay.actions.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+                actions.iter().map(|a| a.ordinal).collect::<Vec<_>>(),
+                "{skin:?} changed the action ordinals"
+            );
+            geometries.push(
+                lay.fields
+                    .iter()
+                    .map(|f| (f.label_rect.x, f.label_rect.y))
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        // …and the ABI is byte-identical afterwards. Rendering is a read.
+        assert_eq!(
+            client.facet(&key).unwrap(),
+            before,
+            "a render touched the ABI"
+        );
+
+        // ANTI-VACUITY, and the half that makes this test worth having: the
+        // skins must actually DIFFER in geometry. Four skins that all produced
+        // the same rects would satisfy every assertion above while proving
+        // nothing — "one surface, many skins" would collapse to "one skin".
+        for (i, a) in geometries.iter().enumerate() {
+            for (j, b) in geometries.iter().enumerate().skip(i + 1) {
+                assert_ne!(
+                    a, b,
+                    "skins {:?} and {:?} produced identical geometry",
+                    skins[i], skins[j]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_palette_offers_codebook_titles_at_ordinals_and_a_pick_is_an_address() {
+        // The palette is offered-but-not-linked. Two classes so ordinal 0 is
+        // distinguishable from a hardcoded singleton.
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0102, invoice_class());
+        client.register_class(
+            0x0301,
+            ClientClass {
+                concept: "task".to_string(),
+                title: "Task".to_string(),
+                fields: vec![ClientField::new("Name", "name")],
+                actions: vec!["Open".to_string()],
+            },
+        );
+        let parent = key_for(0x0300);
+        // NON-SEQUENTIAL, and deliberately not in offer order: the parent's
+        // placement actions are at ordinals 5 and 3. Using 0 and 1 here would
+        // let a palette that derived the ordinal from its offer INDEX pass —
+        // and that palette would fire an unrelated parent action, because the
+        // server resolves an ActionInvoke against the parent's own ActionDef
+        // list (a2ui_server::action_stream::resolve_action).
+        client.offer_class(parent, 0, 0x0102, 5);
+        client.offer_class(parent, 0, 0x0301, 3);
+
+        let palette = client.palette_surface(&parent, 0);
+        assert_eq!(palette.len(), 2);
+        assert_eq!(palette[0].ordinal, 5, "the DECLARED ordinal, not the index");
+        assert_eq!(palette[1].ordinal, 3);
+        // The captions come from the CODEBOOK — registered separately above,
+        // never passed to `offer_class`. If the palette carried its own names
+        // this assertion would be testing the map instead of the resolution,
+        // and the T1 argument would be hollow.
+        assert_eq!(palette[0].label, "Invoice");
+        assert_eq!(palette[1].label, "Task");
+
+        // A pick is an ordinary ActionInvoke at that ordinal — the UNMODIFIED
+        // up-wire path. No new frame type exists for placing a tile.
+        let up = client.invoke_action(parent, palette[1].ordinal, vec![]);
+        match Frame::from_le_bytes(&up).unwrap() {
+            Frame::ActionInvoke(a) => {
+                assert_eq!(a.action_ordinal, 3);
+                assert_eq!(a.key, parent);
+                assert!(a.args.is_empty(), "a pick carries an address, not data");
+            }
+            other => panic!("a pick must travel as ActionInvoke, got {other:?}"),
+        }
+
+        // Offering is NOT placing — the silence half, and it must be checked
+        // in BOTH directions or "available" and "placed" would be one concept.
+        assert!(client.child_at(&parent, 0).is_none());
+        let offered_only = client.resolve_nested(&parent, 4);
+        assert!(
+            offered_only.is_none_or(|s| s.children.is_empty()),
+            "an offer must not appear as a linked child"
+        );
+        // …and a slot with no offers has an EMPTY palette, so the map is
+        // consulted rather than a default list being produced.
+        assert!(client.palette_surface(&parent, 1).is_empty());
+
+        // A duplicate offer does not double the palette (a re-sync is safe).
+        client.offer_class(parent, 0, 0x0102, 5);
+        assert_eq!(client.palette_surface(&parent, 0).len(), 2);
+
+        // An offered class the codebook does not know is SKIPPED, not given an
+        // invented caption — the client cannot render an unsynced template.
+        client.offer_class(parent, 0, 0x0999, 7);
+        assert_eq!(client.offered_at(&parent, 0).len(), 3);
+        assert_eq!(client.palette_surface(&parent, 0).len(), 2);
+    }
+
     #[test]
     fn nested_surface_composes_screen_and_drilldown() {
         // Nesting (L1 screen / L2++ drill-down): a screen is a class whose slot
@@ -804,6 +1096,132 @@ mod tests {
             client.apply_node_delta(&bad),
             Err(ClientError::ValueUnderrun { need: 2, have: 1 })
         );
+    }
+
+    #[test]
+    fn a_position_past_the_addressable_surface_is_refused_not_silently_dropped() {
+        // The defect this replaces: the apply loop's `if pos < FACET_LEN` had
+        // no `else`, so an out-of-range position consumed no value byte and
+        // raised no error — the field vanished while `apply` returned Ok. The
+        // loop was already loud on the UNDER-supply side of the same iteration
+        // (`ValueUnderrun`) and silent on the over-range side.
+        //
+        // Position 64, not 12: an off-by-one in either direction accidentally
+        // passes at the boundary, and `a2ui-core` already round-trips 40 and 64
+        // (`node_delta_round_trips_wide_mask`), so this frame is well-formed on
+        // the wire and only unrenderable here.
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0102, invoice_class());
+        let key = key_for(0x0102);
+        let wide = Frame::NodeDelta(NodeDelta {
+            key,
+            mask_words: vec![0b1, 0b1], // positions 0 and 64
+            values: vec![42, 99],
+        })
+        .to_le_bytes();
+        assert_eq!(
+            client.apply_node_delta(&wide),
+            Err(ClientError::PositionOutOfRange {
+                position: 64,
+                limit: FACET_LEN
+            })
+        );
+
+        // Silence twin — and it must be NON-TRIVIAL, so it is the same frame
+        // with the same value count, differing only in the position. A guard
+        // that refused every delta would pass the half above.
+        let ok = Frame::NodeDelta(NodeDelta {
+            key,
+            mask_words: vec![0b101], // positions 0 and 2, both in range
+            values: vec![42, 99],
+        })
+        .to_le_bytes();
+        assert!(client.apply_node_delta(&ok).is_ok());
+        assert_eq!(client.facet(&key).unwrap()[2], 99);
+
+        // …and the refusal did not swallow the neighbouring error: an
+        // under-supplied but IN-range mask must still be a ValueUnderrun.
+        let short = Frame::NodeDelta(NodeDelta {
+            key,
+            mask_words: vec![0b101],
+            values: vec![7],
+        })
+        .to_le_bytes();
+        assert_eq!(
+            client.apply_node_delta(&short),
+            Err(ClientError::ValueUnderrun { need: 2, have: 1 })
+        );
+    }
+
+    #[test]
+    fn a_refused_delta_leaves_no_trace_in_the_node_state() {
+        // "Never a partial apply" was a DOC PROMISE the code did not keep:
+        // both refusals were raised mid-loop, after earlier positions had
+        // already been written, so a rejected frame still mutated cached state
+        // and a later valid delta could make that value visible.
+        let mut client = FieldviewClient::new();
+        client.register_class(0x0102, invoice_class());
+        let key = key_for(0x0102);
+
+        // Seed a known-good state so "unchanged" is a real observation rather
+        // than "still empty".
+        client
+            .apply_node_delta(
+                &Frame::NodeDelta(NodeDelta {
+                    key,
+                    mask_words: vec![0b1],
+                    values: vec![11],
+                })
+                .to_le_bytes(),
+            )
+            .unwrap();
+        let before = client.facet(&key).unwrap();
+        assert_eq!(before[0], 11);
+
+        // A frame whose FIRST position is valid and second is out of range.
+        // Position 0 would have been written before the refusal.
+        let mixed = Frame::NodeDelta(NodeDelta {
+            key,
+            mask_words: vec![0b1, 0b1], // 0 (valid) then 64 (out of range)
+            values: vec![99, 77],
+        })
+        .to_le_bytes();
+        assert!(matches!(
+            client.apply_node_delta(&mixed),
+            Err(ClientError::PositionOutOfRange { .. })
+        ));
+        assert_eq!(
+            client.facet(&key).unwrap(),
+            before,
+            "a refused frame mutated node state"
+        );
+
+        // Same for the under-supply refusal: positions 0 and 2, one byte.
+        let short = Frame::NodeDelta(NodeDelta {
+            key,
+            mask_words: vec![0b101],
+            values: vec![42],
+        })
+        .to_le_bytes();
+        assert!(matches!(
+            client.apply_node_delta(&short),
+            Err(ClientError::ValueUnderrun { .. })
+        ));
+        assert_eq!(client.facet(&key).unwrap(), before);
+
+        // Two-sided: a VALID frame still applies, so "unchanged" is not simply
+        // what this client does with every frame.
+        client
+            .apply_node_delta(
+                &Frame::NodeDelta(NodeDelta {
+                    key,
+                    mask_words: vec![0b101],
+                    values: vec![42, 7],
+                })
+                .to_le_bytes(),
+            )
+            .unwrap();
+        assert_ne!(client.facet(&key).unwrap(), before);
     }
 
     #[test]
