@@ -95,9 +95,9 @@ scales out before P-REHOST is green.
 ## Build
 
 ```sh
-cargo +1.95.0 test            # workspace = edition 2024 / rust 1.95 (matches OGAR)
-cargo +1.95.0 clippy --all-targets -- -D warnings
-cargo +1.95.0 fmt --check
+cargo +1.97.1 test            # workspace = edition 2024 / rust 1.97.1 (matches OGAR)
+cargo +1.97.1 clippy --all-targets -- -D warnings
+cargo +1.97.1 fmt --check
 ```
 
 ## Git — token-safe push (hard-won lesson, do not relearn)
