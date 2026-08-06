@@ -143,6 +143,51 @@ pub enum Skin {
         /// a division by zero rather than a sensible degenerate case.
         cols: u8,
     },
+    /// The tile skin — the surface placed at a **geographic** coordinate read
+    /// out of its own fields, rather than at an iteration- or mask-derived
+    /// slot.
+    ///
+    /// This is the map topcoat, and it is still charter-T1 clean: no new
+    /// widget vocabulary, no new surface type, no `Skin`-specific field kind.
+    /// It reads the SAME `&[FieldView]` the form and flow skins read; it just
+    /// takes two of those fields to be a coordinate.
+    ///
+    /// # Which two fields, and why that is not a private convention
+    ///
+    /// `rail` names a `(u8:u8)` pair of the V3 content-blind facet register
+    /// (`lance-graph` `le-contract.md` §3): the two mask positions
+    /// `rail*2` and `rail*2 + 1`. For a spatially-bound domain those two
+    /// bytes are a `256×256` centroid tile's **x** and **y** — the workspace
+    /// canon binds the axes per domain and names OSM explicitly ("OSM:
+    /// literal x/y"). `ogar_osm::GEO_V3_FACET` is the table that says so for
+    /// the Geo domain: rails 0–3 are the HHTL cascade tiers heel/hip/twig/leaf,
+    /// coarse to fine, so `rail` is also the **zoom** choice.
+    ///
+    /// A semantic domain binds the same rail to a PQ subspace pair instead —
+    /// which is exactly why this skin takes the rail as a parameter and does
+    /// not hardcode "geo".
+    ///
+    /// # One surface is one marker
+    ///
+    /// A row is a feature, so a `Tile` layout places ONE marker. A trace or a
+    /// viewport of features is N surfaces → N layouts, merged by the consumer.
+    /// That composes with no new API here because
+    /// [`PaintLayout::click_to_action_frame`] takes the key as an ARGUMENT
+    /// rather than storing it: a consumer holds `Vec<([u8; 16], PaintLayout)>`
+    /// and hit-tests each, so the up-frame is addressed to the right row.
+    ///
+    /// # Degenerate input falls back rather than piling up at the origin
+    ///
+    /// A surface whose rail fields are missing, or whose values do not read as
+    /// a byte, has no coordinate. Placing it at `(0, 0)` would silently stack
+    /// every such surface in one corner and look like a rendering bug; this
+    /// skin falls back to [`Skin::Form`] for that surface instead, which is
+    /// visibly "no position known".
+    Tile {
+        /// Which `(u8:u8)` facet rail carries the coordinate. For the Geo
+        /// domain: 0 = heel (coarsest) … 3 = leaf (finest).
+        rail: u8,
+    },
     // Future skins (each a renderer of the same surface): Spatial (CAD),
     // Graph (native). See projectional-knowledge-editor-v1.md.
 }
@@ -292,6 +337,7 @@ pub fn layout_with_skin(
         Skin::Form => place_form(fields, vp),
         Skin::Flow => place_flow(fields, vp),
         Skin::Grid { cols } => place_grid(fields, vp, cols),
+        Skin::Tile { rail } => place_tile(fields, vp, rail),
     };
 
     // The action button row, below the fields, laid left-to-right (wrapping to a
@@ -382,6 +428,97 @@ fn place_form(fields: &[FieldView], vp: &Viewport) -> (Vec<PlacedField>, f32) {
         }
     }
     (placed, y)
+}
+
+/// Marker footprint — the clickable dot the tile skin places at the coordinate.
+const MARKER: f32 = 16.0;
+
+/// Read one facet byte out of the resolved surface: the field at `position`,
+/// whose `value` reads as a `u8`. `None` when the field is absent or its value
+/// is not a byte — the two ways a surface can fail to carry a coordinate.
+fn facet_byte(fields: &[FieldView], position: u8) -> Option<u8> {
+    fields
+        .iter()
+        .find(|f| f.position == position)
+        .and_then(|f| f.value.trim().parse::<u8>().ok())
+}
+
+/// Tile skin — the surface placed at the geographic coordinate carried by
+/// facet rail `rail` (positions `rail*2` = x, `rail*2 + 1` = y).
+///
+/// # The y flip is load-bearing, not cosmetic
+///
+/// TMS tile y increases **north**; screen y increases **down**. Placing a
+/// coordinate without the flip mirrors the map about its horizontal axis —
+/// which still looks like a map, so it is the kind of bug that ships. The
+/// flip is `1.0 - fy`, pinned two-sided by
+/// `tile_skin_flips_y_because_tms_y_increases_north`.
+fn place_tile(fields: &[FieldView], vp: &Viewport, rail: u8) -> (Vec<PlacedField>, f32) {
+    let (Some(x), Some(y)) = (
+        facet_byte(fields, rail * 2),
+        facet_byte(fields, rail * 2 + 1),
+    ) else {
+        // No coordinate in this surface — see `Skin::Tile`'s doc: fall back
+        // rather than stack every unplaceable surface at the origin.
+        return place_form(fields, vp);
+    };
+
+    // Byte index -> unit fraction of the tile, then to the drawable box. 255
+    // (not 256) because both endpoints must be reachable: a feature at the
+    // tile's far edge belongs at the far edge, not one step short of it.
+    let fx = f32::from(x) / 255.0;
+    let fy = f32::from(y) / 255.0;
+    let span_w = (vp.width - 2.0 * PAD - MARKER).max(0.0);
+    let span_h = (vp.height - 2.0 * PAD - MARKER).max(0.0);
+    let mx = PAD + fx * span_w;
+    let my = PAD + (1.0 - fy) * span_h; // <- the TMS -> screen flip
+
+    let marker = Rect {
+        x: mx,
+        y: my,
+        w: MARKER,
+        h: MARKER,
+    };
+
+    // The two coordinate fields ARE the marker: clicking the dot resolves to
+    // the address that placed it. Every other field draws as a callout row
+    // beside it — the info card in the shipped Fahrtenbuch shape — so the
+    // whole surface stays addressable, not just the coordinate.
+    let mut placed = Vec::with_capacity(fields.len());
+    let callout_x = mx + MARKER + GAP;
+    let callout_w = (vp.width - callout_x - PAD).max(0.0);
+    let mut cy = my;
+    for f in fields {
+        if f.position == rail * 2 || f.position == rail * 2 + 1 {
+            placed.push(PlacedField {
+                position: f.position,
+                label: f.label.clone(),
+                value: f.value.clone(),
+                label_rect: marker,
+                value_rect: marker,
+            });
+            continue;
+        }
+        placed.push(PlacedField {
+            position: f.position,
+            label: f.label.clone(),
+            value: f.value.clone(),
+            label_rect: Rect {
+                x: callout_x,
+                y: cy,
+                w: callout_w / 2.0,
+                h: MOBILE_LINE_H,
+            },
+            value_rect: Rect {
+                x: callout_x + callout_w / 2.0,
+                y: cy,
+                w: callout_w / 2.0,
+                h: MOBILE_LINE_H,
+            },
+        });
+        cy += MOBILE_LINE_H;
+    }
+    (placed, cy.max(my + MARKER))
 }
 
 /// Flow skin — document-style inline "label value" runs flowing left-to-right,
@@ -753,6 +890,174 @@ mod tests {
             },
         ]
     }
+    /// A geo surface: rail 0 carries the coordinate (`heel.x` / `heel.y`, the
+    /// `ogar_osm::GEO_V3_FACET` reading), plus one non-coordinate field so the
+    /// callout path is exercised too.
+    fn geo_fields(x: u8, y: u8) -> Vec<FieldView> {
+        vec![
+            FieldView {
+                position: 0,
+                label: "Heel x".into(),
+                predicate: "geo:heel.x".into(),
+                value: x.to_string(),
+            },
+            FieldView {
+                position: 1,
+                label: "Heel y".into(),
+                predicate: "geo:heel.y".into(),
+                value: y.to_string(),
+            },
+            FieldView {
+                position: 11,
+                label: "Identity".into(),
+                predicate: "geo:identity".into(),
+                value: "0".into(),
+            },
+        ]
+    }
+
+    fn marker_of(layout: &PaintLayout) -> Rect {
+        layout
+            .fields
+            .iter()
+            .find(|f| f.position == 0)
+            .expect("the x field must be placed")
+            .label_rect
+    }
+
+    fn map_vp() -> Viewport {
+        Viewport::new(1000.0, 800.0)
+    }
+
+    #[test]
+    fn tile_skin_places_the_marker_at_the_rail_coordinate() {
+        let vp = map_vp();
+        let west = marker_of(&layout_with_skin(
+            &geo_fields(0, 128),
+            &[],
+            &vp,
+            Skin::Tile { rail: 0 },
+        ));
+        let east = marker_of(&layout_with_skin(
+            &geo_fields(255, 128),
+            &[],
+            &vp,
+            Skin::Tile { rail: 0 },
+        ));
+        assert!(
+            west.x < east.x,
+            "x byte 0 must place west of x byte 255 ({} vs {})",
+            west.x,
+            east.x
+        );
+        // Both endpoints are REACHABLE — the /255 (not /256) divisor. A far-edge
+        // feature belongs at the far edge, not one step short of it.
+        assert!((west.x - PAD).abs() < f32::EPSILON);
+        assert!((east.x + MARKER - (vp.width - PAD)).abs() < 0.01);
+    }
+
+    #[test]
+    fn tile_skin_flips_y_because_tms_y_increases_north() {
+        // The bug this pins mirrors the map about its horizontal axis, which
+        // still LOOKS like a map — so it is the kind that ships. Two-sided:
+        // north must be up AND south must be down.
+        let vp = map_vp();
+        let north = marker_of(&layout_with_skin(
+            &geo_fields(128, 255),
+            &[],
+            &vp,
+            Skin::Tile { rail: 0 },
+        ));
+        let south = marker_of(&layout_with_skin(
+            &geo_fields(128, 0),
+            &[],
+            &vp,
+            Skin::Tile { rail: 0 },
+        ));
+        assert!(
+            north.y < south.y,
+            "TMS y=255 is NORTH and must draw ABOVE y=0 ({} vs {})",
+            north.y,
+            south.y
+        );
+        assert!((north.y - PAD).abs() < f32::EPSILON);
+        assert!((south.y + MARKER - (vp.height - PAD)).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_surface_without_a_coordinate_falls_back_instead_of_stacking_at_the_origin() {
+        let vp = map_vp();
+        let tile = Skin::Tile { rail: 0 };
+        // No rail-0 fields at all.
+        let absent = layout_with_skin(&fields(), &[], &vp, tile);
+        assert_eq!(
+            absent.fields,
+            layout_with_skin(&fields(), &[], &vp, Skin::Form).fields
+        );
+
+        // Present but not a byte — the other way a coordinate can be missing.
+        let mut junk = geo_fields(10, 20);
+        junk[0].value = "n/a".into();
+        let unparseable = layout_with_skin(&junk, &[], &vp, tile);
+        assert_eq!(
+            unparseable.fields,
+            layout_with_skin(&junk, &[], &vp, Skin::Form).fields
+        );
+
+        // Anti-vacuity: a WELL-FORMED surface must NOT take the fallback, or
+        // the two assertions above would pass for a skin that never places
+        // anything.
+        let good = layout_with_skin(&geo_fields(10, 20), &[], &vp, tile);
+        assert_ne!(
+            good.fields,
+            layout_with_skin(&geo_fields(10, 20), &[], &vp, Skin::Form).fields
+        );
+    }
+
+    #[test]
+    fn clicking_the_marker_round_trips_the_coordinate_address() {
+        let vp = map_vp();
+        let layout = layout_with_skin(&geo_fields(64, 192), &[], &vp, Skin::Tile { rail: 0 });
+        let m = marker_of(&layout);
+        // The dot resolves to the address that placed it, so an up-frame from a
+        // map click is addressed, never a handler (charter T2).
+        assert_eq!(
+            layout.hit_test(m.x + m.w / 2.0, m.y + m.h / 2.0),
+            Some(Hit::Field(0))
+        );
+        // A non-coordinate field is still addressable from its callout row.
+        let callout = layout.fields.iter().find(|f| f.position == 11).unwrap();
+        let r = callout.hit_rect();
+        assert_eq!(layout.hit_test(r.x + 1.0, r.y + 1.0), Some(Hit::Field(11)));
+    }
+
+    #[test]
+    fn distinct_coordinates_place_at_distinct_pixels_and_the_skin_is_pure() {
+        let vp = map_vp();
+        let tile = Skin::Tile { rail: 0 };
+        let a = marker_of(&layout_with_skin(&geo_fields(10, 20), &[], &vp, tile));
+        let b = marker_of(&layout_with_skin(&geo_fields(200, 30), &[], &vp, tile));
+        assert_ne!((a.x, a.y), (b.x, b.y));
+        // Pure: same inputs -> same layout, so N surfaces can be laid out
+        // independently and merged by the consumer.
+        let again = marker_of(&layout_with_skin(&geo_fields(10, 20), &[], &vp, tile));
+        assert_eq!((a.x, a.y), (again.x, again.y));
+    }
+
+    #[test]
+    fn a_finer_rail_reads_a_different_pair_of_positions() {
+        // `rail` is the zoom choice: rail 0 = heel (coarsest) ... rail 3 = leaf.
+        // A surface carrying ONLY rail 0 must not be silently placed by rail 3.
+        let vp = map_vp();
+        let only_heel = geo_fields(255, 255);
+        let by_leaf = layout_with_skin(&only_heel, &[], &vp, Skin::Tile { rail: 3 });
+        assert_eq!(
+            by_leaf.fields,
+            layout_with_skin(&only_heel, &[], &vp, Skin::Form).fields,
+            "rail 3 must not read rail 0's bytes"
+        );
+    }
+
     fn actions() -> Vec<ActionRef> {
         vec![
             ActionRef {
