@@ -99,7 +99,38 @@ rewrites**):
 | `a2ui-core` | re-exports `ogar-a2ui-frame` (W1 frames) | seed (shipped) |
 | `a2ui-server` | the graph desktop projection + the live session loop: RBAC-project (`WideFieldMask ∩ role`, fail-closed) → `NodeDelta` + askama fieldview down; `ActionInvoke` up by ordinal address; `ogar-encryption` sealed session transport (fresh-salt invariant); `DesktopSession` + Klickwege edges; **`lowering` (#209): `lower_action_fire`→`ActionInvocation`, `lower_screen_jump`→`NavWitness` — pure compile-time fns** | **W2 + W5 + #209 lowering shipped** (34 tests, warden COMPILE-TIME-CLEAN) |
 | `a2ui-wasm` | the fieldview client — codebook + per-node facet state; ingest `NodeDelta` LE zero-copy; resolve `key → ClassView → template`; render via `ogar-render-askama::render_field_view`; actions up by ordinal; **`resolved_fields`/`resolved_actions` accessor (one surface, two renderers); `resolve_nested` (L1/L2 drill-down by address)** | **W3 + accessor + nesting** (10 tests; `wasm32` green) |
-| `a2ui-paint` | the **paint tier** — consumer-agnostic renderer of the resolved surface: adaptive 2-D layout (`DeviceClass` mobile/desktop) from `position`/`ordinal` addresses; hit-test→ordinal→`ActionInvoke` (T2); **`Skin{Form,Flow}` — many skins, one surface** (projectional editor); GPU raster behind optional `wgpu` (WebGPU+WebGL2, N2) | **shipped** (5 tests; `wgpu` feature clippy-green) |
+| `a2ui-paint` | the **paint tier** — consumer-agnostic renderer of the resolved surface: adaptive 2-D layout (`DeviceClass` mobile/desktop) from `position`/`ordinal` addresses; hit-test→ordinal→`ActionInvoke` (T2); **`Skin{Form,Flow,Grid,Tile}` — many skins, one surface** (projectional editor); GPU raster behind optional `wgpu` (WebGPU+WebGL2, N2) | **shipped** (14 tests; `wgpu` feature clippy-green) |
+
+### `Skin::Tile` — the map topcoat (2026-08-06)
+
+The spatial skin, and the one where **placement stops coming from `position`**.
+`Form`/`Flow` place by iteration order; `Grid` reads `position` as a row-major
+cell; `Tile` reads a *geographic* coordinate **out of the surface's own
+fields** — the two mask positions `rail*2` / `rail*2 + 1`.
+
+That is not a private convention. The 12-byte V3 facet register is carved
+`6×(u8:u8)` (`le-contract.md` §3), each rail is a `256×256` centroid tile, and
+the canon binds the axes per domain naming OSM explicitly — *"OSM: literal
+x/y"*. `ogar_osm::GEO_V3_FACET` (OGAR #249, merged) is the table that says so:
+rails 0–3 are the HHTL tiers heel→leaf, so **`rail` is also the zoom choice**.
+A semantic domain binds the same rail to a PQ subspace pair, which is why the
+skin takes `rail` as a parameter rather than hardcoding geo.
+
+Three things a future session should not re-derive:
+
+- **The y flip is load-bearing.** TMS y increases *north*; screen y increases
+  *down*. Omitting `1.0 - fy` mirrors the map about its horizontal axis — which
+  still looks like a map, so it ships. Pinned two-sided and mutation-verified.
+- **One surface is one marker.** A trace or a viewport is N surfaces → N
+  layouts, merged by the consumer. This needs **no new API**: 
+  `click_to_action_frame` takes the key as an *argument*, so a consumer holds
+  `Vec<([u8;16], PaintLayout)>` and each up-frame is addressed to its own row.
+- **No coordinate ⇒ fall back to `Form`,** never `(0, 0)`. Placing unplaceable
+  surfaces at the origin silently stacks them in one corner and reads as a
+  rendering bug.
+
+T1 holds throughout: no new surface type, no widget vocabulary, no geo-specific
+field kind — the same `&[FieldView]` every other skin consumes.
 
 Upstream deps are **all on `branch = "main"`** now (float-then-flip complete):
 `a2ui-core`'s `ogar-a2ui-frame` (W1, OGAR #206) and `a2ui-server`'s
