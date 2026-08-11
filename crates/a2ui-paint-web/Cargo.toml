@@ -1,0 +1,27 @@
+[package]
+name = "a2ui-paint-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Railway-deployable demo of the a2ui paint tier: one resolved surface, many skins, clicks answered by ordinal address."
+
+[dependencies]
+# The paint tier under demonstration — layout + hit-test, the pure paint-DATA
+# path. `wgpu` is deliberately NOT enabled: this binary rasterizes to SVG on the
+# server, and the container has no GPU (see Dockerfile.railway).
+a2ui-paint = { path = "../a2ui-paint" }
+
+# The W1 up-frame. A click becomes `Frame::ActionInvoke(..).to_le_bytes()` —
+# behavior by ADDRESS (charter T2), and the LE bytes ARE the wire form
+# (charter T3): no serde on the hot path, no JSON frame envelope.
+a2ui-core = { path = "../a2ui-core" }
+
+# The addressed-surface types the paint tier consumes. Same `FieldView` /
+# `ActionRef` the askama render and the wasm client resolve — one surface.
+ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
+
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
