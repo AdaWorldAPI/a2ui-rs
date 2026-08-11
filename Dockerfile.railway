@@ -2,22 +2,39 @@
 # ---------------------------------------------------------------------------
 # a2ui-rs — Railway image for the PAINT tier.
 #
-# ⚠ PREREQUISITE: this Dockerfile builds a BINARY that does not exist yet.
-#    Every crate in this workspace is a library (`a2ui-core`, `a2ui-paint`,
-#    `a2ui-server`, `a2ui-wasm` — no `[[bin]]`, no `main.rs` anywhere), so
-#    there is currently nothing for Railway to run. Create the bin crate named
-#    below, then this file deploys it unchanged.
-#
 #    The bin's ONLY hard contract with Railway: bind `0.0.0.0:$PORT`, reading
 #    PORT from the environment. Railway injects it; 8080 is a local fallback
 #    only and must never be hardcoded as the bind port.
 #
-# WHY PAINT-ONLY IS THE LEAN IMAGE. `a2ui-paint` depends on exactly two things
-# — `ogar-render-askama` (OGAR, git) and `a2ui-core` (path). It does NOT depend
-# on `a2ui-server`, and therefore NOT on `lance-graph-contract`. Adding the
-# server tier pulls the whole lance-graph dependency tree into this image and
-# raises the toolchain floor (see TOOLCHAIN below). Keep the paint deployable
-# paint-only unless the server tier is actually being demonstrated.
+# WHAT THIS IMAGE CONTAINS. `a2ui-paint-web` = the paint tier (`a2ui-paint`) +
+# the fieldview client (`a2ui-wasm`) + the W1 frames (`a2ui-core`). The client
+# is what lets the deployed demo resolve its surface from a real `NodeDelta`
+# instead of a hand-written fixture; it costs a git fetch of lance-graph for
+# `lance-graph-contract`.
+#
+# ⚠ CORRECTION (this file, previous revision) — BOTH its reasons were wrong,
+# and together they read as a standing reason never to wire the client in:
+#
+#   1. "pulls the whole lance-graph dependency tree into this image" — FALSE.
+#      `lance-graph-contract` is dependency-free BY EXPLICIT DESIGN; its
+#      manifest says it "MUST stay dependency-free even of optional path deps,"
+#      because as a workspace member any path dep breaks every cargo invocation
+#      in their CI. No lance, no DataFusion, no arrow arrives here.
+#
+#   2. "raises the toolchain floor [to 1.97.1]" — ALSO FALSE, and the more
+#      interesting error. Measured: `cargo +1.95.0 build -p a2ui-paint-web`
+#      compiles `lance-graph-contract` from scratch and passes all 8 tests.
+#      The 1.97.1 came from lance-graph's `rust-toolchain.toml`, which is THAT
+#      REPO'S OWN build pin — cargo does not read a dependency's toolchain file,
+#      so it never propagates to a consumer. An MSRV that binds you is
+#      `rust-version` in the dependency's manifest, and that crate declares
+#      none. Reading a `rust-toolchain.toml` as an inherited floor is the
+#      generalizable mistake; it is a statement about their CI, not your build.
+#
+# `a2ui-server` remains out of scope for a reason that survives both
+# corrections: RBAC projection + sealed session transport are a server tier this
+# demo does not exercise, and it adds `ogar-encryption` + `ogar-vocab` for
+# machinery nothing here calls.
 #
 # WHY NO GPU FEATURE. `a2ui-paint`'s `wgpu` feature is OFF by default and MUST
 # stay off here: Railway containers have no GPU. This costs nothing — the
@@ -27,14 +44,15 @@
 # renderer needs; wgpu only adds the surface draw, which belongs in the
 # browser, not in this container. Do NOT add `--features wgpu`.
 #
-# TOOLCHAIN — 1.97.1, NOT the 1.95.0 this repo's CLAUDE.md still documents.
-# `rust-version = "1.95"` in Cargo.toml and `cargo +1.95.0` in CLAUDE.md are
-# both now below the floor: `a2ui-server` depends on `lance-graph-contract`
-# from lance-graph `main`, which pins `channel = "1.97.1"` (bumped from 1.95.0
-# together with lance 9 / lancedb 0.33 / DataFusion 54). A paint-only image
-# does not transitively hit that dep — but pinning 1.97.1 here keeps one
-# toolchain across the workspace and survives the server tier being added.
-# Bump this line and the repo's pins together, never separately.
+# TOOLCHAIN — 1.97.1 by ALIGNMENT, not by necessity. CLAUDE.md documents
+# `cargo +1.97.1` as this workspace's toolchain, so the image uses it and one
+# version holds everywhere. What this pin is NOT is a floor: the crate declares
+# `rust-version = "1.95"` and genuinely builds and tests green on 1.95.0 with
+# every dependency present (measured, see the CORRECTION above). A newer
+# toolchain always works, so alignment is free — but do not cite this line as
+# evidence that something requires 1.97.1. If the floor ever really does rise,
+# it will show up as a `rust-version` bump in a manifest, and THAT is the thing
+# to move in lockstep with this pin.
 # ---------------------------------------------------------------------------
 
 ARG RUST_VERSION=1.97.1

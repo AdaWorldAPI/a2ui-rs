@@ -34,3 +34,18 @@ wgpu = ["dep:wgpu"]
 # embedded DejaVu font). The THIRD renderer of the one surface (HTML / GPU / PNG),
 # for checking screens with no display. Pure-Rust deps; crate stays forbid-unsafe.
 raster = ["dep:fontdue", "dep:png"]
+
+# Both examples `use a2ui_paint::raster::…`, but `raster` is off by default, so
+# an undeclared example is compiled by `--all-targets` WITHOUT the module it
+# imports. That made this repo's own documented gate —
+# `cargo clippy --all-targets -- -D warnings` — fail on `main` with
+# `E0432: unresolved import`, for both examples, independent of any change under
+# review. `required-features` is the declaration cargo already has for exactly
+# this: the example is built when the feature is on and skipped when it is not.
+[[example]]
+name = "screen"
+required-features = ["raster"]
+
+[[example]]
+name = "patient"
+required-features = ["raster"]
