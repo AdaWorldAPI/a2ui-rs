@@ -23,5 +23,23 @@ a2ui-core = { path = "../a2ui-core" }
 # `ActionRef` the askama render and the wasm client resolve — one surface.
 ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
 
+# The fieldview CLIENT — the crate that turns down-wire `NodeDelta` LE bytes
+# into that resolved surface. This binary uses it as the browser would: register
+# the class codebook, ingest a real frame, then read `resolved_fields` /
+# `resolved_actions`. Without it the demo's surface is a hand-written fixture
+# and the wire path is never exercised by the thing that gets deployed.
+#
+# It costs one git fetch of lance-graph for `lance-graph-contract`, which is
+# ZERO-DEP BY DESIGN (its manifest says so, emphatically: "it MUST stay
+# dependency-free even of optional path deps"). It does NOT drag in lance /
+# DataFusion / arrow, and it does NOT raise the toolchain floor — measured, the
+# whole crate builds and tests green on 1.95.0. `Dockerfile.railway` carries
+# both measurements and the earlier claims they correct.
+#
+# The crate boundary a2ui-wasm's own manifest names — "a2ui-paint never depends
+# on a2ui-wasm" — is intact: `a2ui-paint` still doesn't. This is a BINARY
+# composing the two library tiers, which is the direction the boundary allows.
+a2ui-wasm = { path = "../a2ui-wasm" }
+
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }

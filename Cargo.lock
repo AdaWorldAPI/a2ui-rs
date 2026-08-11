@@ -26,6 +26,7 @@ version = "0.1.0"
 dependencies = [
  "a2ui-core",
  "a2ui-paint",
+ "a2ui-wasm",
  "axum",
  "ogar-render-askama",
  "tokio",
