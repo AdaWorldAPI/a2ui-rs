@@ -1,0 +1,97 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# a2ui-rs — Railway image for the PAINT tier.
+#
+# ⚠ PREREQUISITE: this Dockerfile builds a BINARY that does not exist yet.
+#    Every crate in this workspace is a library (`a2ui-core`, `a2ui-paint`,
+#    `a2ui-server`, `a2ui-wasm` — no `[[bin]]`, no `main.rs` anywhere), so
+#    there is currently nothing for Railway to run. Create the bin crate named
+#    below, then this file deploys it unchanged.
+#
+#    The bin's ONLY hard contract with Railway: bind `0.0.0.0:$PORT`, reading
+#    PORT from the environment. Railway injects it; 8080 is a local fallback
+#    only and must never be hardcoded as the bind port.
+#
+# WHY PAINT-ONLY IS THE LEAN IMAGE. `a2ui-paint` depends on exactly two things
+# — `ogar-render-askama` (OGAR, git) and `a2ui-core` (path). It does NOT depend
+# on `a2ui-server`, and therefore NOT on `lance-graph-contract`. Adding the
+# server tier pulls the whole lance-graph dependency tree into this image and
+# raises the toolchain floor (see TOOLCHAIN below). Keep the paint deployable
+# paint-only unless the server tier is actually being demonstrated.
+#
+# WHY NO GPU FEATURE. `a2ui-paint`'s `wgpu` feature is OFF by default and MUST
+# stay off here: Railway containers have no GPU. This costs nothing — the
+# crate's own doc states the paint-DATA path (layout + hit-test) is pure and
+# testable without it. `layout()` / `layout_with_skin()` → `PaintLayout`
+# (`PlacedField` / `PlacedAction` / `Hit`) is the whole surface a server-side
+# renderer needs; wgpu only adds the surface draw, which belongs in the
+# browser, not in this container. Do NOT add `--features wgpu`.
+#
+# TOOLCHAIN — 1.97.1, NOT the 1.95.0 this repo's CLAUDE.md still documents.
+# `rust-version = "1.95"` in Cargo.toml and `cargo +1.95.0` in CLAUDE.md are
+# both now below the floor: `a2ui-server` depends on `lance-graph-contract`
+# from lance-graph `main`, which pins `channel = "1.97.1"` (bumped from 1.95.0
+# together with lance 9 / lancedb 0.33 / DataFusion 54). A paint-only image
+# does not transitively hit that dep — but pinning 1.97.1 here keeps one
+# toolchain across the workspace and survives the server tier being added.
+# Bump this line and the repo's pins together, never separately.
+# ---------------------------------------------------------------------------
+
+ARG RUST_VERSION=1.97.1
+ARG BIN_NAME=a2ui-paint-web
+
+# ── builder ────────────────────────────────────────────────────────────────
+FROM rust:${RUST_VERSION}-slim-bookworm AS builder
+ARG BIN_NAME
+
+# git: the OGAR / lance-graph dependencies are fetched as git deps by cargo.
+# Both repos are PUBLIC, so no credential is needed here — do not add a token
+# to this image. (Contrast tesseract-rs, whose siblings are path deps cloned
+# at build time; this workspace uses git deps and needs no such step.)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+# Copy the manifests first so the dependency build layer caches independently
+# of source edits. `Cargo.lock` is copied deliberately: the build must be
+# reproducible, and an unlocked resolve would silently drift the git deps.
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# `--locked` is the point of copying Cargo.lock — it fails loudly rather than
+# re-resolving. If this errors, the lock is stale: fix it in a commit, never by
+# dropping the flag.
+RUN cargo build --release --locked -p ${BIN_NAME} \
+ && cp target/release/${BIN_NAME} /usr/local/bin/a2ui-paint-web
+
+# ── runtime ────────────────────────────────────────────────────────────────
+# Distro-slim, not distroless: the binary is dynamically linked against glibc
+# and needs ca-certificates for any outbound TLS. No Rust toolchain, no source,
+# no build cache in the final image.
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --create-home --uid 10001 a2ui
+
+COPY --from=builder /usr/local/bin/a2ui-paint-web /usr/local/bin/a2ui-paint-web
+
+# Static assets, if the bin serves any. Harmless when the directory is absent
+# — but note Docker COPY fails on a missing source, so keep this commented
+# until `crates/a2ui-paint-web/static/` actually exists.
+# COPY --from=builder /src/crates/a2ui-paint-web/static /app/static
+
+USER a2ui
+WORKDIR /app
+
+# Documentation only. Railway routes to whatever the process binds; EXPOSE
+# publishes nothing by itself and is NOT the port contract.
+EXPOSE 8080
+
+# No CMD-level port. The binary reads PORT from the environment so that
+# Railway's injected value wins; baking one in here is how a container ends up
+# listening where nothing is routed.
+CMD ["a2ui-paint-web"]
