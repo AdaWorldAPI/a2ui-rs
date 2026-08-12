@@ -1,0 +1,22 @@
+[package]
+name = "a2ui-solid-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Railway-deployable demo of the solid tier: a parametric part addressed by six u8:u8 rails, projected to SVG on the server, exported as STL, and edited by NodeDelta. The wire carries 12 bytes; the mesh never crosses it."
+
+[dependencies]
+# The kernel under demonstration. Zero geometry deps, so this image stays as
+# lean as the paint one.
+a2ui-solid = { path = "../a2ui-solid" }
+
+# The W1 frames. A dimension change travels as a `NodeDelta` carrying facet
+# bytes — the same down-wire frame the paint tier ingests, applied to geometry
+# instead of a form. `to_le_bytes` is the format (charter T3).
+a2ui-core = { path = "../a2ui-core" }
+
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }

@@ -46,6 +46,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2ui-solid"
+version = "0.1.0"
+
+[[package]]
+name = "a2ui-solid-web"
+version = "0.1.0"
+dependencies = [
+ "a2ui-core",
+ "a2ui-solid",
+ "axum",
+ "tokio",
+]
+
+[[package]]
 name = "a2ui-wasm"
 version = "0.1.0"
 dependencies = [

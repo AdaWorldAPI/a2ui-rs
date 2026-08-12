@@ -1,0 +1,82 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# a2ui-rs — Railway image for the SOLID tier.
+#
+# The SECOND deployable, and deliberately separate from `Dockerfile.railway`.
+# That one renders the PAINT tier and should keep doing exactly that; mixing a
+# CAD demo into it would leave neither claim legible. One image per tier, one
+# claim per image.
+#
+#   Dockerfile.railway        -> a2ui-paint-web   (the paint tier: skins, hit-test)
+#   Dockerfile.solid.railway  -> a2ui-solid-web   (this: parametric solids)
+#
+# WHAT THIS TIER DEMONSTRATES. The a2ui thesis one dimension up: don't push
+# meshes — address the solid. A part is a classid plus six `u8:u8` rails on the
+# 12-byte content-blind facet; the mesh is DERIVED. `/delta.bin` is the whole
+# part on the wire, `/model.stl` is the same part as geometry, and the ratio
+# between them is printed at `/health`. Refine with `?res=` and the STL grows
+# while the frame does not move — that independence is the claim.
+#
+# WHY IT IS STILL A LEAN IMAGE. `a2ui-solid` has **zero dependencies**: the CSG
+# is a signed-distance field (booleans are `min`/`max`, so mesh-boolean
+# robustness never arises), surface extraction is marching tetrahedra
+# (watertight by construction), and the binary STL writer is ~40 lines. The
+# only crates in the tree are `a2ui-core` for the frames plus axum/tokio —
+# the same shape as the paint image. `csgrs`, the obvious geometry dependency,
+# is currently unbuildable anyway (it requires the yanked `core2 0.4.0`).
+#
+# WHY NO GPU. Same as the paint image, and more pointedly: the projection at
+# `/` is orthographic isometric computed on the CPU and emitted as SVG
+# polygons. Vector out, no raster, no canvas, no `wgpu`. Railway containers
+# have no GPU and this tier does not want one.
+#
+# TOOLCHAIN — 1.97.1 by ALIGNMENT, not necessity, exactly as in the paint
+# image. The crates declare `rust-version = "1.95"` and build green there; the
+# pin matches the toolchain CLAUDE.md documents so one version holds across the
+# workspace. Do not cite this line as evidence that something requires 1.97.1.
+# ---------------------------------------------------------------------------
+
+ARG RUST_VERSION=1.97.1
+ARG BIN_NAME=a2ui-solid-web
+
+# ── builder ────────────────────────────────────────────────────────────────
+FROM rust:${RUST_VERSION}-slim-bookworm AS builder
+ARG BIN_NAME
+
+# git for the OGAR / lance-graph git dependencies pulled by sibling crates in
+# the workspace. Both repos are PUBLIC — do not add a token to this image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+# `--locked` fails loudly rather than re-resolving. If this errors the lock is
+# stale: fix it in a commit, never by dropping the flag.
+RUN cargo build --release --locked -p ${BIN_NAME} \
+ && cp target/release/${BIN_NAME} /usr/local/bin/a2ui-solid-web
+
+# ── runtime ────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --create-home --uid 10001 a2ui
+
+COPY --from=builder /usr/local/bin/a2ui-solid-web /usr/local/bin/a2ui-solid-web
+
+USER a2ui
+WORKDIR /app
+
+# Documentation only. Railway routes to whatever the process binds; EXPOSE
+# publishes nothing by itself and is NOT the port contract.
+EXPOSE 8080
+
+# No CMD-level port. The binary reads PORT from the environment so Railway's
+# injected value wins; baking one in is how a container ends up listening where
+# nothing is routed.
+CMD ["a2ui-solid-web"]
