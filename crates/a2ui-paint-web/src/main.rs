@@ -102,13 +102,6 @@ struct Demo {
     concept: u16,
 }
 
-/// Resolve the demo surface the way a browser would.
-///
-/// The values are **facet bytes**, not strings, and the demo shows them as
-/// such. That is not a shortcut — the V3 content-blind facet is 12 bytes
-/// (`le-contract` §3), so a field's value on this wire IS one byte. A demo that
-/// displayed `"RE-2026-0042"` here would be showing something the register
-/// cannot hold, which is a pleasant-looking lie about the substrate.
 /// The demo's codebook entry — position-ordered fields (index = mask position)
 /// and ordinal-ordered action captions. This is the "font of the desktop": sent
 /// once per class, reused by every instance of it.
@@ -116,27 +109,54 @@ struct Demo {
 /// Factored out so the falsifier test resolves against the REAL class rather
 /// than a lookalike built beside it — a copy would drift and the test would
 /// keep passing while proving nothing about what the server serves.
+///
+/// The class is deliberately a **synthetic sensor**, and the choice is not
+/// cosmetic.
+///
+/// An earlier version used German ERP vocabulary — `Belegnummer` / `Betrag` /
+/// `Buchen` / `Stornieren` on a class called `Vorgang`. Nothing was copied from
+/// anywhere: those are ordinary German bookkeeping terms and the predicates
+/// were Odoo's `account.move` names. But `AdaWorldAPI/woa-rs` is a **private**
+/// German ERP that uses that same vocabulary, this repo is **public**, and the
+/// deployed page consequently read as though it were rendering a private app's
+/// screen. Provenance did not matter; the appearance did.
+///
+/// A sensor has no such twin. It is also honest about what the demo is for —
+/// this binary demonstrates the paint tier, not a business domain, and a form
+/// that looks like somebody's real software invites exactly the wrong question.
+/// (The same three-field-plus-actions shape is used by `a2ui-wasm`'s own G5
+/// reusability test, for the same reason.)
+///
+/// Values are `u8` facet bytes, so the units are picked to make a byte the
+/// natural range: °C, %, kPa, dBm all sit inside 0–255 without scaling.
 fn demo_class() -> ClientClass {
     ClientClass {
-        concept: "vorgang".to_string(),
-        title: "Vorgang".to_string(),
+        concept: "sensor_reading".to_string(),
+        title: "Sensor".to_string(),
         fields: vec![
-            ClientField::new("Belegnummer", "name"),
-            ClientField::new("Position", "line_no"),
-            ClientField::new("Betrag (EUR)", "amount_total"),
+            ClientField::new("Temperature (C)", "temperature_c"),
+            ClientField::new("Humidity (%)", "humidity_pct"),
+            ClientField::new("Pressure (kPa)", "pressure_kpa"),
             // Declared by the class, never sent down the wire — see
             // `UNSENT_POSITION`.
-            ClientField::new("Rabatt (%)", "discount_pct"),
-            ClientField::new("Status", "state"),
+            ClientField::new("Battery (%)", "battery_pct"),
+            ClientField::new("Signal (-dBm)", "signal_dbm"),
         ],
         actions: vec![
-            "Ansehen".to_string(),
-            "Buchen".to_string(),
-            "Stornieren".to_string(),
+            "Read".to_string(),
+            "Calibrate".to_string(),
+            "Reset".to_string(),
         ],
     }
 }
 
+/// Resolve the demo surface the way a browser would.
+///
+/// The values are **facet bytes**, not strings, and the demo shows them as
+/// such. That is not a shortcut — the V3 content-blind facet is 12 bytes
+/// (`le-contract` §3), so a field's value on this wire IS one byte. A demo that
+/// displayed a formatted document number here would be showing something the
+/// register cannot hold, which is a pleasant-looking lie about the substrate.
 fn build_demo() -> Demo {
     let class_id = concept_of_key(&DEMO_KEY);
     let mut client = FieldviewClient::new();
@@ -153,7 +173,7 @@ fn build_demo() -> Demo {
     let delta = Frame::NodeDelta(NodeDelta {
         key: DEMO_KEY,
         mask_words: vec![mask],
-        values: vec![42, 7, 240, 1],
+        values: vec![21, 55, 101, 72],
     })
     .to_le_bytes();
 
@@ -625,7 +645,7 @@ mod tests {
         let bytes = Frame::NodeDelta(NodeDelta {
             key: DEMO_KEY,
             mask_words: vec![0b1_1111],
-            values: vec![42, 7, 240, 15, 1],
+            values: vec![21, 55, 101, 88, 72],
         })
         .to_le_bytes();
         client.apply_node_delta(&bytes).expect("well-formed frame");
@@ -651,7 +671,11 @@ mod tests {
     #[test]
     fn both_renderers_agree_because_they_share_one_resolution() {
         let d = demo();
-        assert!(d.html.contains("data-concept=\"vorgang\""), "{}", d.html);
+        assert!(
+            d.html.contains("data-concept=\"sensor_reading\""),
+            "{}",
+            d.html
+        );
         for f in &d.fields {
             assert!(
                 d.html.contains(&f.label),
@@ -661,7 +685,7 @@ mod tests {
         }
         // And the field the wire never carried is in NEITHER projection.
         assert!(
-            !d.html.contains("Rabatt"),
+            !d.html.contains("Battery"),
             "the unsent field leaked into the HTML render"
         );
     }
