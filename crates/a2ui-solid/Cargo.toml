@@ -1,0 +1,21 @@
+[package]
+name = "a2ui-solid"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Parametric solids as addressed objects: a closed CSG vocabulary whose parameters are u8:u8 rails on the 12-byte content-blind facet, evaluated as a signed distance field and meshed watertight for printing. Don't push meshes — address the solid."
+
+# ZERO dependencies, and that is a design constraint rather than a happy
+# accident. Two futures are both cheaper for it: promoting the vocabulary into
+# OGAR as real classids, and moving this kernel to its own repo after the POC.
+# A geometry dependency would have to be renegotiated in both. It also keeps the
+# deploy image lean, matching the paint tier's posture.
+#
+# `csgrs` was the obvious candidate and is currently unbuildable (it requires
+# the yanked `core2 0.4.0`) — but the SDF formulation in `sdf.rs` is not a
+# fallback: it makes the mesh-boolean robustness problem *not arise* rather
+# than handling it.
+[dependencies]
