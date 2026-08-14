@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/a2ui-core", "crates/a2ui-paint", "crates/a2ui-paint-web", "crates/a2ui-server", "crates/a2ui-solid", "crates/a2ui-solid-web", "crates/a2ui-wasm"]
+members = ["crates/a2ui-core", "crates/a2ui-graph", "crates/a2ui-paint", "crates/a2ui-paint-web", "crates/a2ui-server", "crates/a2ui-solid", "crates/a2ui-solid-web", "crates/a2ui-wasm"]
 
 [workspace.package]
 version = "0.1.0"
