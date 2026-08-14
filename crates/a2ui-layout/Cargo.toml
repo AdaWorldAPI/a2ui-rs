@@ -1,0 +1,11 @@
+[package]
+name = "a2ui-layout"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs layout substrate — the shared UX zone vocabulary, layout modes and pixel BUDGETS every app renders into. Fixed arrangement, computed budgets, address-driven modes (the Moca principle: the address arranges the surface, never the template). Zero dependencies: it is arithmetic and an enum, so a server crate, a wasm client and a build script can all agree on the same numbers."
+
+[dependencies]
