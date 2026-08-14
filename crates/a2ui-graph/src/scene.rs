@@ -317,13 +317,13 @@ pub enum Facet {
     Evidence,
 }
 
+/// The shared fixture, reachable from the GPU tests too — one graph, so a
+/// CPU assertion and a pixel assertion are talking about the same thing.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
+pub(crate) mod tests_support {
     /// A path graph 0-1-2-3-4 plus an isolated node 5, with distinct domain
-    /// bytes — enough shape to make every assertion below falsifiable.
-    fn fixture() -> Vec<u8> {
+    /// bytes — enough shape to make every assertion falsifiable.
+    pub(crate) fn fixture() -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(b"MGRA");
         b.extend_from_slice(&3u16.to_le_bytes());
@@ -350,6 +350,12 @@ mod tests {
         }
         b
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tests_support::fixture;
 
     fn scene(buf: &[u8]) -> (GraphAbi<'_>, Scene) {
         let abi = GraphAbi::parse(buf).expect("parses");

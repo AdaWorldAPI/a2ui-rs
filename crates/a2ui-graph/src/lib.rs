@@ -48,6 +48,12 @@ pub mod abi;
 pub mod layout;
 pub mod scene;
 
+#[cfg(feature = "wgpu")]
+pub mod gpu;
+
 pub use abi::{AbiError, GraphAbi};
 pub use layout::Layout;
 pub use scene::{EdgeIndex, Facet, NodeInstance, Scene};
+
+#[cfg(feature = "wgpu")]
+pub use gpu::{Camera, FieldRenderer};
