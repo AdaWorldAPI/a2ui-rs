@@ -73,15 +73,36 @@ RUN apt-get update \
 WORKDIR /src
 
 # Copy the manifests first so the dependency build layer caches independently
-# of source edits. `Cargo.lock` is copied deliberately: the build must be
-# reproducible, and an unlocked resolve would silently drift the git deps.
+# of source edits. `Cargo.lock` is copied deliberately: it pins the git deps
+# (wgpu, OGAR) to exact revs, which is most of what reproducibility buys here.
+# It does NOT pin ndarray — see the note above the build step.
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 
-# `--locked` is the point of copying Cargo.lock — it fails loudly rather than
-# re-resolving. If this errors, the lock is stale: fix it in a commit, never by
-# dropping the flag.
-RUN cargo build --release --locked -p ${BIN_NAME} \
+# NO `--locked` HERE, and it is not laziness — the flag CANNOT hold in this
+# image, by this repo's own design.
+#
+# `.cargo/config.toml` is TRACKED and carries
+# `[patch."https://github.com/AdaWorldAPI/ndarray"] ndarray = { path =
+# "../ndarray" }`, so every local `cargo` run resolves ndarray from the sibling
+# CHECKOUT and writes that into `Cargo.lock`. The committed lock's ndarray entry
+# therefore has NO `source` line at all — it is a path resolution.
+#
+# This Dockerfile deliberately does not copy `.cargo/config.toml` (that file's
+# own header says so), so in here cargo must resolve the same coordinate from
+# GIT. Different source, same package. `--locked` forbids exactly that
+# re-resolution, so it fails every build — not when the lock is "stale", but
+# always, and the sibling path it names does not exist in this image either.
+#
+# The lock is still COPIED and still earns its place: the wgpu and OGAR entries
+# carry real `source` + rev, so those stay pinned and cargo re-resolves only the
+# one entry it must. What is given up is "nothing moved", which this repo had
+# already given up the moment the patch file was tracked.
+#
+# To get `--locked` back, the lock has to be produced the way the image resolves
+# — e.g. `cargo generate-lockfile` with the patch disabled, committed as such —
+# not by re-adding the flag over a lock that structurally cannot match.
+RUN cargo build --release -p ${BIN_NAME} \
  && cp target/release/${BIN_NAME} /usr/local/bin/a2ui-paint-web
 
 # ── runtime ────────────────────────────────────────────────────────────────
