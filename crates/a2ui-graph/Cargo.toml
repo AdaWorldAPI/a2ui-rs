@@ -1,0 +1,54 @@
+[package]
+name = "a2ui-graph"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs graph lane — the GPU renderer of the node/edge FIELD. Division of labor (operator-ruled 2026-08-14): the FieldView renderer draws the NODE PREVIEW (addressed fields, ClassView x mask) and is the wrong renderer for a graph field, permanently; THIS crate draws the field — instanced SDF rings + indexed line-list edges over wgpu (WebGPU / WebGL2), fed ZERO-COPY from the graph-ABI v3 LE lanes. No SVG in the field; transparent overlay windows above the canvas are the consumer's business."
+
+[dependencies]
+# Instance/vertex buffers are #[repr(C)] Pod structs cast to bytes — the ONE
+# sanctioned cast, so the crate stays forbid(unsafe_code).
+bytemuck = { version = "1", features = ["derive"] }
+# The GPU draw — OFF by default. The data path (ABI view, layout, scene,
+# hit-test, interaction grammar) is pure and testable without a device.
+wgpu = { version = "22", optional = true }
+
+# The browser client: canvas-bound surface + frame loop. Pulls wasm-bindgen
+# and the three web-sys interfaces the loop actually touches — nothing wider,
+# so a native build never sees them.
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+js-sys = { version = "0.3", optional = true }
+
+[dependencies.web-sys]
+version = "0.3"
+optional = true
+features = [
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "Window",
+    "MouseEvent",
+    "WheelEvent",
+]
+
+[features]
+default = []
+wgpu = ["dep:wgpu"]
+# The browser tier. Implies `wgpu` because a canvas surface without a device
+# is nothing — a feature that compiles but cannot draw would be a trap.
+web = [
+    "wgpu",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:js-sys",
+    "dep:web-sys",
+    "wgpu/webgl",
+]
+
+[dev-dependencies]
+# GPU tests block on the async adapter/device request without pulling tokio.
+pollster = "0.3"
