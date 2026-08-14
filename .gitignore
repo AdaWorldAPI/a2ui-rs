@@ -2,3 +2,7 @@
 **/*.rs.bk
 Cargo.lock.orig
 .DS_Store
+
+# wasm-bindgen output of scripts/build-graph-wasm.sh — a build artifact,
+# regenerated from the crate; never a source of truth.
+crates/a2ui-graph/pkg/
