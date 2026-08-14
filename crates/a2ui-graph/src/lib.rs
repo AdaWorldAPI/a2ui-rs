@@ -51,7 +51,11 @@ pub mod scene;
 #[cfg(feature = "wgpu")]
 pub mod gpu;
 
-#[cfg(all(feature = "web", target_arch = "wasm32"))]
+// The browser client is present on wasm32 whenever there is a device to draw
+// with — no `web` feature to remember. A wasm32 build IS a browser build
+// (operator, 2026-08-14: wasm as the default), so the only thing that can
+// still switch it off is switching off the GPU itself.
+#[cfg(all(target_arch = "wasm32", feature = "wgpu"))]
 pub mod web;
 
 pub use abi::{AbiError, GraphAbi};
