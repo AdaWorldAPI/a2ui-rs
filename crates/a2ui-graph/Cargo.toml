@@ -37,7 +37,7 @@ bytemuck = { version = "1", features = ["derive"] }
 # `master`, not `main`.
 ndarray = { git = "https://github.com/AdaWorldAPI/ndarray", branch = "master", default-features = false, features = ["std"] }
 # The GPU draw — ON by default (operator, 2026-08-14). See [features].
-wgpu = { version = "22", optional = true }
+wgpu = { workspace = true, optional = true }
 
 # ── The browser tier — automatic on wasm32, absent everywhere else ──────────
 #
@@ -55,7 +55,7 @@ js-sys = "0.3"
 # machines this tier exists to serve that means no renderer — not a slower
 # one. (Operator's assumption, checked: the fallback is not "no worse than
 # no wgpu", it is the difference between drawing and not drawing.)
-wgpu = { version = "22", optional = true, features = ["webgl"] }
+wgpu = { workspace = true, optional = true, features = ["webgl"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
 version = "0.3"

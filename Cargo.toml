@@ -9,3 +9,39 @@ license = "MIT"
 repository = "https://github.com/AdaWorldAPI/a2ui-rs"
 authors = ["AdaWorldAPI"]
 rust-version = "1.95"
+
+# ── The fork, named ONCE, with no version anywhere ───────────────────────────
+#
+# P0 (lance-graph `CLAUDE.md`): depend on the AdaWorldAPI fork of any crate that
+# has one, never the registry copy.
+#
+# **No pins.** Not in the member crates, not here. A version requirement on a
+# forked crate is a lie waiting to be maintained: the source is the fork's
+# branch, so the number never decides anything — it only has to be found and
+# edited again on the next fork bump, in every crate that spells it. The member
+# crates say `wgpu = { workspace = true, … }` and nothing else; the fork bumps by
+# moving `trunk`, and this file does not change either.
+#
+# Two entries, because they cover different edges and neither implies the other:
+#
+#   * `[workspace.dependencies]` — what THIS workspace's crates resolve. One URL,
+#     one branch, three call sites that cannot drift apart.
+#   * `[patch.crates-io]` — what a TRANSITIVE dependency resolves. Without it,
+#     the day any dep pulls `wgpu` from the registry, cargo builds a second wgpu
+#     with incompatible types alongside the fork's. The patch folds it onto the
+#     same node.
+#
+# `git`, not `path`: this repo has no sibling checkout (its `ndarray` and `ogar-*`
+# deps are git URLs too) and no CI to arrange one. A path dep — or a symlink
+# standing in for one — would make the build depend on a layout outside the
+# repository. `Cargo.lock` pins the resolved rev, so `branch = "trunk"` is
+# reproducible without a version requirement.
+#
+# Watch for `warning: Patch `wgpu` … was not used in the crate graph`. That is a
+# policy alert, not noise: it means the redirect matched nothing and something is
+# being built against the registry copy.
+[workspace.dependencies]
+wgpu = { git = "https://github.com/AdaWorldAPI/wgpu", branch = "trunk" }
+
+[patch.crates-io]
+wgpu = { git = "https://github.com/AdaWorldAPI/wgpu", branch = "trunk" }
