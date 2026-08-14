@@ -1,0 +1,39 @@
+/* a2ui-layout — die Zonen-Geometrie. Das Gegenstück zu `lib.rs`.
+ *
+ * Diese Datei enthält NUR Anordnung: Spalten, Modi, die Zwei-Pane-Teilung.
+ * Keine Farbe, keine Schrift, keine Komponente. Ein App-Theme setzt Tokens
+ * und lässt das hier in Ruhe — genau deshalb kann eine App ihr Aussehen
+ * ändern, ohne dass die Budgets wandern.
+ *
+ * Die Zahlen sind dieselben wie in `a2ui_layout::{LEFT_NAV_PX, …}`. Sie
+ * stehen doppelt, weil CSS keine Rust-Konstanten liest — deshalb hält
+ * `assets_match_the_rust_constants` in lib.rs genau diese Datei dagegen.
+ * Eine Zahl hier ändern und die Konstante nicht: der Test fällt. */
+
+.a2-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.a2-body {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr) 270px;
+    align-items: start;
+}
+
+/* main_wide: die 270px-Rail weicht dem 70px-Schnellmenü, die Mitte bekommt
+ * den Rest. 1920 = 210 + 2×820 + 70. 2440 = 210 + 2×1080 + 70. */
+.a2-body.mode-main-wide { grid-template-columns: 210px minmax(0, 1fr) 70px; }
+
+/* Zwei GLEICHE Hälften. Ein frei proportionales Paar wäre wieder eine
+ * Fläche, die sich ihre Geometrie selbst ausdenkt. */
+.a2-duo {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    min-height: 0;
+}
+.a2-duo > * { min-width: 0; min-height: 0; }
+
+/* Struktur-Marker: Adressen, KEINE Style-Hooks. Absichtlich leer — wer hier
+ * gestaltet, koppelt Inhalt an Anordnung und nimmt der Shell die Freiheit,
+ * Modi zu schalten. */
+.region-top_bar, .region-patient_context, .region-left_nav,
+.region-center, .region-right_panel, .region-bottom_bar { /* do not style */ }
