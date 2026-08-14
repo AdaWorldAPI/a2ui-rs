@@ -9,10 +9,10 @@ rust-version.workspace = true
 description = "a2ui-rs graph lane — the GPU renderer of the node/edge FIELD. Division of labor (operator-ruled 2026-08-14): the FieldView renderer draws the NODE PREVIEW (addressed fields, ClassView x mask) and is the wrong renderer for a graph field, permanently; THIS crate draws the field — instanced SDF rings + indexed line-list edges over wgpu (WebGPU / WebGL2), fed ZERO-COPY from the graph-ABI v3 LE lanes. No SVG in the field; transparent overlay windows above the canvas are the consumer's business."
 
 [lib]
-# `cdylib` so `--target wasm32-unknown-unknown --features web` emits a `.wasm`
-# a browser can actually load. Without it the `web` feature compiles to an
-# rlib and the field client is unreachable — a feature that builds but cannot
-# ship, which is worse than one that does not exist, because it looks done.
+# `cdylib` so `--target wasm32-unknown-unknown` emits a `.wasm` a browser can
+# actually load. Without it the browser tier compiles to an rlib and the field
+# client is unreachable — something that builds but cannot ship, which is
+# worse than something missing, because it looks done.
 #
 # `rlib` stays alongside it: the pure data path (abi / layout / scene) is a
 # normal Rust dependency for native consumers, and `cargo test` needs it.
@@ -36,20 +36,29 @@ bytemuck = { version = "1", features = ["derive"] }
 # AdaWorldAPI fork, never crates.io (lance-graph P0). Default branch is
 # `master`, not `main`.
 ndarray = { git = "https://github.com/AdaWorldAPI/ndarray", branch = "master", default-features = false, features = ["std"] }
-# The GPU draw — OFF by default. The data path (ABI view, layout, scene,
-# hit-test, interaction grammar) is pure and testable without a device.
+# The GPU draw — ON by default (operator, 2026-08-14). See [features].
 wgpu = { version = "22", optional = true }
 
-# The browser client: canvas-bound surface + frame loop. Pulls wasm-bindgen
-# and the three web-sys interfaces the loop actually touches — nothing wider,
-# so a native build never sees them.
-wasm-bindgen = { version = "0.2", optional = true }
-wasm-bindgen-futures = { version = "0.4", optional = true }
-js-sys = { version = "0.3", optional = true }
+# ── The browser tier — automatic on wasm32, absent everywhere else ──────────
+#
+# These are NOT optional and NOT feature-gated: they are target-gated. A
+# `wasm32` build is a browser build; asking it to also pass `--features web`
+# was ceremony that only ever produced the mistake of forgetting it. A native
+# build never sees these lines at all, so the "nothing wider" property the
+# old comment claimed is now enforced by the target, not by a promise.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+# The WebGL2 fallback, always on for wasm32. wgpu tries WebGPU first and
+# falls back; without this feature there is no fallback at all, and on the
+# machines this tier exists to serve that means no renderer — not a slower
+# one. (Operator's assumption, checked: the fallback is not "no worse than
+# no wgpu", it is the difference between drawing and not drawing.)
+wgpu = { version = "22", optional = true, features = ["webgl"] }
 
-[dependencies.web-sys]
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
 version = "0.3"
-optional = true
 features = [
     "Document",
     "Element",
@@ -60,18 +69,21 @@ features = [
 ]
 
 [features]
-default = []
+# `wgpu` is default (operator, 2026-08-14). The crate's purpose is to DRAW a
+# field; a default that cannot draw made every consumer opt in to the point
+# of the crate, and made "it built" a weaker statement than it looked.
+#
+# The pure data path (ABI view, layout, scene, hit-test, interaction grammar)
+# is still device-free and still testable without one — reach it with
+# `default-features = false` when a consumer genuinely only wants to parse or
+# lay out. That is the honest cost of this flip: `cargo test` now compiles
+# wgpu, so a data-path-only contributor pays a slower first build.
+default = ["wgpu"]
 wgpu = ["dep:wgpu"]
-# The browser tier. Implies `wgpu` because a canvas surface without a device
-# is nothing — a feature that compiles but cannot draw would be a trap.
-web = [
-    "wgpu",
-    "dep:wasm-bindgen",
-    "dep:wasm-bindgen-futures",
-    "dep:js-sys",
-    "dep:web-sys",
-    "wgpu/webgl",
-]
+# Kept so existing `--features web` invocations keep working. On wasm32 it is
+# now redundant (the browser tier is target-gated above); on native it is
+# exactly `wgpu`, because there is no browser to bind to.
+web = ["wgpu"]
 
 [dev-dependencies]
 # GPU tests block on the async adapter/device request without pulling tokio.

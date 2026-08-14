@@ -71,7 +71,7 @@ fi
 # no error.
 echo "building (simd128, rust $TOOLCHAIN)…"
 RUSTFLAGS='-C target-feature=+simd128' \
-  cargo "+$TOOLCHAIN" build -p a2ui-graph --features web \
+  cargo "+$TOOLCHAIN" build -p a2ui-graph \
               --target wasm32-unknown-unknown --release
 
 # ── 3. Guard: is the client actually IN the module? ────────────────────────

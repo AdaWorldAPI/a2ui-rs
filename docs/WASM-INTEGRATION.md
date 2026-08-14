@@ -55,12 +55,30 @@ checks the four preconditions that otherwise fail silently or confusingly:
 
 ```bash
 RUSTFLAGS='-C target-feature=+simd128' \
-  cargo +1.97.1 build -p a2ui-graph --features web \
+  cargo +1.97.1 build -p a2ui-graph \
               --target wasm32-unknown-unknown --release
 
 wasm-bindgen --target web --out-dir pkg \
   target/wasm32-unknown-unknown/release/a2ui_graph.wasm
 ```
+
+**Kein `--features` mehr** (operator, 2026-08-14: wasm ist der Standard).
+Ein `wasm32`-Build IST ein Browser-Build: `wasm-bindgen`, `js-sys`,
+`web-sys` und wgpus WebGL2-Fallback sind *target*-gated statt
+feature-gated, und `wgpu` ist Default. Gemessen an einem Build ganz ohne
+Flags: **133 `FieldHandle`-Symbole, 13 594 SIMD-Instruktionen.**
+
+| Build | was man bekommt |
+|---|---|
+| `cargo build` (nativ) | Datenpfad + GPU-Renderer |
+| `cargo build --no-default-features` (nativ) | nur der Datenpfad, kein Device |
+| `cargo build --target wasm32-…` | der komplette Browser-Client |
+
+Zur WebGL2-Frage, weil sie beim Umstellen aufkam: der Fallback ist nicht
+„nicht schlechter als ohne wgpu" — **ohne wgpu gibt es überhaupt keinen
+Renderer**, das Crate kann dann nur rechnen. WebGL2 ist also der
+Unterschied zwischen zeichnen und nicht zeichnen, nicht zwischen schnell
+und langsam.
 
 Output (measured 2026-08-14): a **4.1 MB** `.wasm`, ~105 KB of JS glue, and
 TypeScript declarations. It is a build artifact and is git-ignored —
