@@ -8,6 +8,16 @@ authors.workspace = true
 rust-version.workspace = true
 description = "a2ui-rs graph lane — the GPU renderer of the node/edge FIELD. Division of labor (operator-ruled 2026-08-14): the FieldView renderer draws the NODE PREVIEW (addressed fields, ClassView x mask) and is the wrong renderer for a graph field, permanently; THIS crate draws the field — instanced SDF rings + indexed line-list edges over wgpu (WebGPU / WebGL2), fed ZERO-COPY from the graph-ABI v3 LE lanes. No SVG in the field; transparent overlay windows above the canvas are the consumer's business."
 
+[lib]
+# `cdylib` so `--target wasm32-unknown-unknown --features web` emits a `.wasm`
+# a browser can actually load. Without it the `web` feature compiles to an
+# rlib and the field client is unreachable — a feature that builds but cannot
+# ship, which is worse than one that does not exist, because it looks done.
+#
+# `rlib` stays alongside it: the pure data path (abi / layout / scene) is a
+# normal Rust dependency for native consumers, and `cargo test` needs it.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 # Instance/vertex buffers are #[repr(C)] Pod structs cast to bytes — the ONE
 # sanctioned cast, so the crate stays forbid(unsafe_code).

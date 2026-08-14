@@ -334,3 +334,185 @@ impl FieldClient {
         drop(self);
     }
 }
+
+// ── The JS surface ──────────────────────────────────────────────────────────
+
+/// The field, as JavaScript sees it.
+///
+/// # Why this wrapper exists at all
+///
+/// Measured 2026-08-14, and it is the reason this module was unreachable:
+/// `web.rs` carried **zero** `#[wasm_bindgen]` attributes. [`FieldClient`] was
+/// a plain Rust struct, so nothing in JS could construct one, so the linker
+/// dropped the whole client — `Layout`, `Scene`, `FieldRenderer` and all. The
+/// receipt was blunt: a release `--features web` module contained **2** SIMD
+/// instructions and no `a2ui_graph::layout::Layout` symbol whatsoever, while
+/// the same code compiled as an rlib carried **800** in `integrate` alone.
+/// The crate compiled, linked, and shipped nothing.
+///
+/// `crate-type = ["cdylib"]` was necessary and NOT sufficient: a cdylib emits
+/// a `.wasm`, but only exported items survive the link. Both halves are
+/// needed, and the first without the second looks finished.
+///
+/// # Why a wrapper and not attributes on `FieldClient`
+///
+/// `Gesture` is an enum with payloads (`Down(f32, f32)`), which wasm-bindgen
+/// cannot carry across the boundary — only C-like enums cross. Rather than
+/// flatten the Rust type to suit the FFI, the boundary gets its own shape:
+/// one method per gesture. The Rust API keeps the enum it wants; JS gets the
+/// calls it wants; neither is bent to the other.
+#[wasm_bindgen]
+pub struct FieldHandle {
+    inner: FieldClient,
+}
+
+/// What a press resolved to, as JavaScript sees it.
+///
+/// Flat `u32` fields, because a tuple has no JS shape. Still an ADDRESS and an
+/// ordinal — never a handler, per the paint charter.
+#[wasm_bindgen]
+#[derive(Clone, Copy, Debug)]
+pub struct PickedJs {
+    ordinal: u32,
+    classid: u32,
+    identity: u32,
+}
+
+#[wasm_bindgen]
+impl PickedJs {
+    /// Index into the node lane.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn ordinal(&self) -> u32 {
+        self.ordinal
+    }
+    /// The address' class half.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn classid(&self) -> u32 {
+        self.classid
+    }
+    /// The address' identity half.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn identity(&self) -> u32 {
+        self.identity
+    }
+}
+
+#[wasm_bindgen]
+impl FieldHandle {
+    /// Mount the field on a canvas over an ABI v3 byte stream.
+    ///
+    /// Async because adapter and device are async on the web, and there is no
+    /// honest way to make that synchronous — a blocking mount would either
+    /// deadlock the event loop or return a client that is not yet usable.
+    ///
+    /// # Errors
+    /// Propagates every failure [`FieldClient::mount`] reports: a stream that
+    /// is not v3, no WebGL2-capable adapter, or a canvas that cannot back a
+    /// surface. None is papered over with a blank canvas.
+    #[wasm_bindgen]
+    pub async fn mount(
+        canvas: web_sys::HtmlCanvasElement,
+        abi_bytes: Vec<u8>,
+    ) -> Result<FieldHandle, JsValue> {
+        // Owned bytes, not a borrowed slice: the handle outlives the call, and
+        // a `&[u8]` across the boundary would tie it to a buffer JS is free to
+        // release. One copy at mount, never per frame.
+        let inner = FieldClient::mount(canvas, &abi_bytes).await?;
+        Ok(FieldHandle { inner })
+    }
+
+    /// Press at a screen point. Returns the node it landed on, if any.
+    #[wasm_bindgen(js_name = pointerDown)]
+    pub fn pointer_down(&mut self, x: f32, y: f32) -> Option<PickedJs> {
+        self.inner.gesture(Gesture::Down(x, y)).map(|p| PickedJs {
+            ordinal: p.ordinal,
+            classid: p.address.0,
+            identity: p.address.1,
+        })
+    }
+
+    /// Move to a screen point — only meaningful while a press is held.
+    #[wasm_bindgen(js_name = pointerMove)]
+    pub fn pointer_move(&mut self, x: f32, y: f32) {
+        self.inner.gesture(Gesture::Move(x, y));
+    }
+
+    /// Release.
+    #[wasm_bindgen(js_name = pointerUp)]
+    pub fn pointer_up(&mut self) {
+        self.inner.gesture(Gesture::Up);
+    }
+
+    /// Wheel at a screen point; `factor > 1` zooms in.
+    #[wasm_bindgen]
+    pub fn zoom(&mut self, x: f32, y: f32, factor: f32) {
+        self.inner.gesture(Gesture::Zoom(x, y, factor));
+    }
+
+    /// Resize with the canvas.
+    #[wasm_bindgen]
+    pub fn resize(&mut self, w: u32, h: u32) {
+        self.inner.resize(w, h);
+    }
+
+    /// Light a bounded neighbourhood around a node.
+    #[wasm_bindgen]
+    pub fn spread(&mut self, seed: u32, hops: u32) -> Vec<u32> {
+        self.inner.spread(seed, hops)
+    }
+
+    /// Light the shortest path between two nodes; empty if none exists.
+    ///
+    /// Empty rather than `null`, because JS callers iterate the result and an
+    /// "either an array or null" return is a null-check waiting to be
+    /// forgotten. "No path" and "a path of no nodes" are the same thing to a
+    /// renderer.
+    #[wasm_bindgen]
+    pub fn trace(&mut self, from: u32, to: u32) -> Vec<u32> {
+        self.inner.trace(from, to).unwrap_or_default()
+    }
+
+    /// Back to the resting field.
+    #[wasm_bindgen]
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// The current selection, as ordinals.
+    #[wasm_bindgen]
+    #[must_use]
+    pub fn selection(&self) -> Vec<u32> {
+        self.inner.selection().to_vec()
+    }
+
+    /// Advance and draw one frame.
+    ///
+    /// # Errors
+    /// If the surface is lost beyond recovery. An outdated surface is
+    /// reconfigured and skipped rather than reported.
+    #[wasm_bindgen]
+    pub fn frame(&mut self) -> Result<(), JsValue> {
+        self.inner.frame()
+    }
+
+    /// Whether the simulation is still moving. A driver stops scheduling
+    /// frames when this goes false and resumes on the next gesture.
+    #[wasm_bindgen(js_name = isWarm)]
+    #[must_use]
+    pub fn is_warm(&self) -> bool {
+        self.inner.is_warm()
+    }
+
+    /// Release the GPU side deterministically.
+    ///
+    /// Consumes the handle: wgpu frees device, surface and every buffer on
+    /// drop, with no GC in the way. The DOM listeners the consumer registered
+    /// are the one thing Rust cannot reclaim — remove them here.
+    #[wasm_bindgen]
+    pub fn detach(self) {
+        self.inner.detach();
+    }
+}
