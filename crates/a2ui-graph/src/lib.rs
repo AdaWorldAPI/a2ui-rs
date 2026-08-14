@@ -51,6 +51,9 @@ pub mod scene;
 #[cfg(feature = "wgpu")]
 pub mod gpu;
 
+#[cfg(all(feature = "web", target_arch = "wasm32"))]
+pub mod web;
+
 pub use abi::{AbiError, GraphAbi};
 pub use layout::Layout;
 pub use scene::{EdgeIndex, Facet, NodeInstance, Scene};
