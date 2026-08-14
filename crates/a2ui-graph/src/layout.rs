@@ -247,14 +247,27 @@ impl Layout {
     /// ```text
     /// RUSTFLAGS='-C target-feature=+simd128' \
     ///   cargo build -p a2ui-graph --target wasm32-unknown-unknown
-    /// llvm-objdump -d target/wasm32-unknown-unknown/debug/liba2ui_graph.rlib \
-    ///   | awk '/integrate/{f=1} f&&/^$/{f=0} f' | grep -cE 'f32x4|v128'
-    /// # 801   <- real SIMD128 in this function
+    ///
+    /// # The symbol, exactly — NOT a text window around its name.
+    /// SYM=$(llvm-nm target/wasm32-unknown-unknown/debug/liba2ui_graph.rlib \
+    ///        | grep 'Layout9integrate17' | awk '{print $3}')
+    /// llvm-objdump -d --disassemble-symbols="$SYM" \
+    ///   target/wasm32-unknown-unknown/debug/liba2ui_graph.rlib \
+    ///   | grep -cE 'f32x4|i32x4|v128\.'
+    /// # 800   <- real SIMD128 in THIS function
     ///
     /// cargo build -p a2ui-graph --target wasm32-unknown-unknown   # no flag
-    /// llvm-objdump -d ... | grep -cE 'f32x4|v128'
     /// # 0     <- scalar fallback, as the polyfill documents
     /// ```
+    ///
+    /// The first version of this receipt said `801` and got it by `awk`-ing a
+    /// window that started at the *string* `integrate` and ran to the next
+    /// blank line. That window is not a function boundary, and the rlib is
+    /// full of ndarray's own vectorised code, so the number could have been
+    /// almost entirely somebody else's. It happened to be off by one — but a
+    /// measurement that is right by luck is not a measurement.
+    /// `--disassemble-symbols` asks the linker's symbol table instead of
+    /// guessing from text, and that is why this form is the one written down.
     ///
     /// # The pin veto is branchless
     ///
