@@ -70,9 +70,7 @@ impl Camera {
     pub fn fit(bounds: (f32, f32, f32, f32), viewport: [f32; 2], margin: f32) -> Self {
         let (x0, y0, x1, y1) = bounds;
         let (w, h) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
-        let scale = (w / viewport[0].max(1.0))
-            .max(h / viewport[1].max(1.0))
-            * margin;
+        let scale = (w / viewport[0].max(1.0)).max(h / viewport[1].max(1.0)) * margin;
         Camera {
             center: [(x0 + x1) * 0.5, (y0 + y1) * 0.5],
             viewport,
@@ -399,10 +397,7 @@ impl FieldRenderer {
             .edges
             .iter()
             .map(|e| {
-                let (a, b) = (
-                    scene.nodes[e.from as usize],
-                    scene.nodes[e.to as usize],
-                );
+                let (a, b) = (scene.nodes[e.from as usize], scene.nodes[e.to as usize]);
                 ArrowInstance {
                     tail: a.pos,
                     head: b.pos,
@@ -487,7 +482,10 @@ mod tests {
         // CAN FIRE: a zero-extent box divides by zero without the floor, and
         // an infinite scale renders a blank canvas that looks like "no data".
         let d = Camera::fit((5.0, 5.0, 5.0, 5.0), [800.0, 400.0], 1.1);
-        assert!(d.scale.is_finite() && d.scale > 0.0, "degenerate box broke the camera");
+        assert!(
+            d.scale.is_finite() && d.scale > 0.0,
+            "degenerate box broke the camera"
+        );
     }
 
     /// Zoom must keep the world point under the cursor fixed — that is what
@@ -649,7 +647,10 @@ mod tests {
         slice.map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::Maintain::Wait);
         let data = slice.get_mapped_range();
-        let painted = data.chunks_exact(4).filter(|p| p[0] | p[1] | p[2] != 0).count();
+        let painted = data
+            .chunks_exact(4)
+            .filter(|p| p[0] | p[1] | p[2] != 0)
+            .count();
 
         assert!(
             painted > 200,

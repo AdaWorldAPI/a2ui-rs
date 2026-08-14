@@ -377,7 +377,10 @@ mod tests {
         // A degree-0 node still gets a drawable radius.
         assert!(s.nodes[5].radius > 0.0);
         // And the byte lanes are the real buffers, not a re-encode.
-        assert_eq!(s.node_bytes().len(), 6 * std::mem::size_of::<NodeInstance>());
+        assert_eq!(
+            s.node_bytes().len(),
+            6 * std::mem::size_of::<NodeInstance>()
+        );
         assert_eq!(s.edge_bytes().len(), 4 * std::mem::size_of::<EdgeIndex>());
     }
 
@@ -432,7 +435,11 @@ mod tests {
         // CAN FIRE: a path-finder that returned a plausible detour instead of
         // None would light nodes that are not connected to the target at all.
         assert_eq!(s.trace(0, 5), None, "different components have no path");
-        assert_eq!(s.trace(0, 99), None, "an out-of-range ordinal is not a path");
+        assert_eq!(
+            s.trace(0, 99),
+            None,
+            "an out-of-range ordinal is not a path"
+        );
     }
 
     #[test]

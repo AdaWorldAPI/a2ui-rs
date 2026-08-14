@@ -81,7 +81,10 @@ impl core::fmt::Display for AbiError {
             AbiError::TooShort => write!(f, "stream shorter than one header"),
             AbiError::BadMagic(m) => write!(f, "bad magic {m:?} (want MGRA)"),
             AbiError::WrongVersion(v) => {
-                write!(f, "wire version {v}, this viewer reads exactly {WIRE_VERSION}")
+                write!(
+                    f,
+                    "wire version {v}, this viewer reads exactly {WIRE_VERSION}"
+                )
             }
             AbiError::Truncated(lane) => write!(f, "lane truncated: {lane}"),
             AbiError::TextOverrun(lane) => write!(f, "text length overruns stream: {lane}"),
@@ -344,7 +347,12 @@ mod tests {
     /// A minimal v3 encoder — the test's own, so the viewer is checked
     /// against the SPEC rather than against a producer that could drift with
     /// it. `version` is a parameter precisely so the gate can be exercised.
-    fn encode(version: u16, nodes: &[(u32, u32, u8, u8)], edges: &[(u32, u32, u8)], labels: &[&str]) -> Vec<u8> {
+    fn encode(
+        version: u16,
+        nodes: &[(u32, u32, u8, u8)],
+        edges: &[(u32, u32, u8)],
+        labels: &[&str],
+    ) -> Vec<u8> {
         let mut b = Vec::new();
         b.extend_from_slice(&MAGIC);
         b.extend_from_slice(&version.to_le_bytes());
@@ -422,7 +430,10 @@ mod tests {
     #[test]
     fn the_version_gate_refuses_both_directions() {
         let v2 = encode(2, &[(1, 1, 9, 9)], &[], &["x"]);
-        assert!(matches!(GraphAbi::parse(&v2), Err(AbiError::WrongVersion(2))));
+        assert!(matches!(
+            GraphAbi::parse(&v2),
+            Err(AbiError::WrongVersion(2))
+        ));
         let v4 = encode(4, &[(1, 1, 9, 9)], &[], &["x"]);
         assert!(matches!(
             GraphAbi::parse(&v4),
@@ -434,7 +445,10 @@ mod tests {
 
     #[test]
     fn a_truncated_or_mislabelled_stream_is_refused_not_guessed() {
-        assert!(matches!(GraphAbi::parse(&[1, 2, 3]), Err(AbiError::TooShort)));
+        assert!(matches!(
+            GraphAbi::parse(&[1, 2, 3]),
+            Err(AbiError::TooShort)
+        ));
         let mut bad = sample();
         bad[0] = b'X';
         assert!(matches!(GraphAbi::parse(&bad), Err(AbiError::BadMagic(_))));

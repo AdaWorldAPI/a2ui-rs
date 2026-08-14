@@ -345,7 +345,11 @@ mod tests {
         let neighbour_before = (l.xs[1], l.ys[1]);
         l.pin(0, 500.0, 500.0);
         l.settle(30);
-        assert_eq!((l.xs[0], l.ys[0]), (500.0, 500.0), "the held node stays held");
+        assert_eq!(
+            (l.xs[0], l.ys[0]),
+            (500.0, 500.0),
+            "the held node stays held"
+        );
         assert!(
             (l.xs[1] - neighbour_before.0).abs() + (l.ys[1] - neighbour_before.1).abs() > 1.0,
             "the neighbour did not react — there is no wobble"
@@ -369,7 +373,10 @@ mod tests {
         l.ys = vec![10.0, 10.0];
         l.settle(20);
         for i in 0..2 {
-            assert!(l.xs[i].is_finite() && l.ys[i].is_finite(), "NaN/inf escaped");
+            assert!(
+                l.xs[i].is_finite() && l.ys[i].is_finite(),
+                "NaN/inf escaped"
+            );
         }
         let d = ((l.xs[0] - l.xs[1]).powi(2) + (l.ys[0] - l.ys[1]).powi(2)).sqrt();
         assert!(d > 0.5, "coincident nodes never separated (d = {d})");
