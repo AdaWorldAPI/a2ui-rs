@@ -21,7 +21,7 @@ a2ui-core = { path = "../a2ui-core" }
 # is pure and testable without it; `wgpu` adds the surface draw. wgpu backends
 # WebGPU + WebGL2, so one crate covers both browser targets. (N2 follow-up: the
 # full pipeline; the DATA path is what ships first.)
-wgpu = { version = "22", optional = true }
+wgpu = { git = "https://github.com/AdaWorldAPI/wgpu", branch = "trunk", optional = true }
 fontdue = { version = "0.9.3", optional = true }
 png = { version = "0.18.1", optional = true }
 

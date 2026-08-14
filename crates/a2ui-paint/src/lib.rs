@@ -730,27 +730,36 @@ fn fs_main() -> @location(0) vec4<f32> {
         /// (a box with neither GPU nor software rasterizer). Accepts the
         /// fallback adapter so it works without real hardware.
         pub async fn new() -> Option<Self> {
+            // `InstanceDescriptor` no longer implements `Default` — it carries a
+            // boxed display handle. `new_without_display_handle()` is the
+            // headless constructor, which is exactly what this painter is.
             let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::all(),
-                ..Default::default()
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
             });
             let adapter = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::LowPower,
                     force_fallback_adapter: false,
                     compatible_surface: None,
+                    // Limit bucketing is a FINGERPRINTING defence for hosts that
+                    // expose wgpu to untrusted content. This painter is headless
+                    // and in-process, so the real limits are the useful ones.
+                    apply_limit_buckets: false,
                 })
-                .await?;
+                // Now a `Result`, not an `Option`: "no adapter" carries a reason.
+                .await
+                .ok()?;
             let (device, queue) = adapter
-                .request_device(
-                    &wgpu::DeviceDescriptor {
-                        label: Some("a2ui-paint device"),
-                        required_features: wgpu::Features::empty(),
-                        required_limits: wgpu::Limits::downlevel_defaults(),
-                        memory_hints: wgpu::MemoryHints::default(),
-                    },
-                    None,
-                )
+                .request_device(&wgpu::DeviceDescriptor {
+                    label: Some("a2ui-paint device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                    memory_hints: wgpu::MemoryHints::default(),
+                    // The old trailing `None` argument, now a field.
+                    trace: wgpu::Trace::Off,
+                })
                 .await
                 .ok()?;
 
@@ -761,16 +770,18 @@ fn fs_main() -> @location(0) vec4<f32> {
             let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("a2ui-paint layout"),
                 bind_group_layouts: &[],
-                push_constant_ranges: &[],
+                // Push constants were renamed to "immediates" and are declared as
+                // a SIZE rather than as ranges. This pipeline uses none.
+                immediate_size: 0,
             });
             let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some("a2ui-paint pipeline"),
                 layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &shader,
-                    entry_point: "vs_main",
+                    entry_point: Some("vs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[wgpu::VertexBufferLayout {
+                    buffers: &[Some(wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<[f32; 2]>() as wgpu::BufferAddress,
                         step_mode: wgpu::VertexStepMode::Vertex,
                         attributes: &[wgpu::VertexAttribute {
@@ -778,11 +789,11 @@ fn fs_main() -> @location(0) vec4<f32> {
                             offset: 0,
                             shader_location: 0,
                         }],
-                    }],
+                    })],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
-                    entry_point: "fs_main",
+                    entry_point: Some("fs_main"),
                     compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &[Some(wgpu::ColorTargetState {
                         format: TARGET_FORMAT,
@@ -793,7 +804,7 @@ fn fs_main() -> @location(0) vec4<f32> {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: None,
                 multisample: wgpu::MultisampleState::default(),
-                multiview: None,
+                multiview_mask: None,
                 cache: None,
             });
 
@@ -850,6 +861,8 @@ fn fs_main() -> @location(0) vec4<f32> {
                     label: Some("a2ui-paint pass"),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &view,
+                        // 2-D target, so there is no depth slice to select.
+                        depth_slice: None,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Clear(clear),
@@ -857,6 +870,7 @@ fn fs_main() -> @location(0) vec4<f32> {
                         },
                     })],
                     depth_stencil_attachment: None,
+                    multiview_mask: None,
                     timestamp_writes: None,
                     occlusion_query_set: None,
                 });

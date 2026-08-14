@@ -105,25 +105,34 @@ impl FieldClient {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
+                // Limit bucketing is the FINGERPRINTING defence for a host that
+                // runs untrusted content. This crate IS the content, not the
+                // host, so it asks for the adapter's real limits; the browser
+                // decides what it is willing to report.
+                apply_limit_buckets: false,
             })
+            // Now a `Result` — "no adapter" carries a reason, which is worth
+            // forwarding verbatim to a browser console that has no other clue.
             .await
-            .ok_or_else(|| {
-                JsValue::from_str("no wgpu adapter for this canvas (WebGL2 missing?)")
+            .map_err(|e| {
+                JsValue::from_str(&format!(
+                    "no wgpu adapter for this canvas (WebGL2 missing?): {e}"
+                ))
             })?;
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: Some("a2ui-graph field"),
-                    required_features: wgpu::Features::empty(),
-                    // The browser tier's real ceiling. Asking for more would
-                    // fail on exactly the machines this exists to serve.
-                    required_limits: wgpu::Limits::downlevel_webgl2_defaults()
-                        .using_resolution(adapter.limits()),
-                    memory_hints: wgpu::MemoryHints::Performance,
-                },
-                None,
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("a2ui-graph field"),
+                required_features: wgpu::Features::empty(),
+                // The browser tier's real ceiling. Asking for more would
+                // fail on exactly the machines this exists to serve.
+                required_limits: wgpu::Limits::downlevel_webgl2_defaults()
+                    .using_resolution(adapter.limits()),
+                experimental_features: wgpu::ExperimentalFeatures::disabled(),
+                memory_hints: wgpu::MemoryHints::Performance,
+                // The old trailing `None` argument, now a field.
+                trace: wgpu::Trace::Off,
+            })
             .await
             .map_err(|e| JsValue::from_str(&format!("device: {e}")))?;
 
@@ -137,6 +146,11 @@ impl FieldClient {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
+            // `Auto` reproduces wgpu's historical SDR behaviour — the same
+            // output this tier had before the field existed. Wide-gamut / HDR
+            // is an opt-in, and opting in silently here would change every
+            // colour in the field.
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: w,
             height: h,
             present_mode: wgpu::PresentMode::Fifo,
@@ -279,13 +293,35 @@ impl FieldClient {
         }
         self.renderer.upload(&self.queue, &self.scene, &self.camera);
 
+        // `get_current_texture` no longer returns a `Result`: it returns a
+        // 7-variant status, and the distinction it adds is real —
+        // `Suboptimal` HANDS BACK a usable texture (a resize the compositor has
+        // not caught up with), where the old API had to fold that into `Ok` and
+        // lose it, or into `Err` and drop a frame that could have been drawn.
+        // So: draw it AND reconfigure, rather than choosing one.
         let frame = match self.surface.get_current_texture() {
-            Ok(f) => f,
-            Err(wgpu::SurfaceError::Outdated | wgpu::SurfaceError::Lost) => {
+            wgpu::CurrentSurfaceTexture::Success(f) => f,
+            wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
+                self.surface.configure(&self.device, &self.config);
+                f
+            }
+            // Recoverable: the swapchain is stale or gone. Reconfigure and skip
+            // this frame — the next one draws.
+            wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
                 return Ok(());
             }
-            Err(e) => return Err(JsValue::from_str(&format!("surface: {e}"))),
+            // Transient and NOT an error: the compositor is not showing us, or
+            // the frame did not arrive in time. Reconfiguring here would be
+            // churn, so this frame is simply skipped.
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                return Ok(());
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                return Err(JsValue::from_str(
+                    "surface: validation error acquiring the next frame",
+                ));
+            }
         };
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
@@ -294,6 +330,8 @@ impl FieldClient {
                 label: Some("field"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    // A 2-D target has no depth slice to select.
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
@@ -306,13 +344,16 @@ impl FieldClient {
                     },
                 })],
                 depth_stencil_attachment: None,
+                multiview_mask: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
             self.renderer.draw(&mut pass);
         }
         self.queue.submit([enc.finish()]);
-        frame.present();
+        // Presentation moved from the texture to the QUEUE — it is a queue
+        // operation, and the old `SurfaceTexture::present` hid that.
+        self.queue.present(frame);
         Ok(())
     }
 

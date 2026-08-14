@@ -154,12 +154,15 @@ fn vb<'a>(
     stride: u64,
     step: wgpu::VertexStepMode,
     attrs: &'a [wgpu::VertexAttribute],
-) -> wgpu::VertexBufferLayout<'a> {
-    wgpu::VertexBufferLayout {
+) -> Option<wgpu::VertexBufferLayout<'a>> {
+    // `VertexState::buffers` is a slice of `Option` now — a `None` slot leaves
+    // that vertex-buffer index unbound. Every call here binds a real layout, so
+    // the wrapping lives in this ONE place instead of at each call site.
+    Some(wgpu::VertexBufferLayout {
         array_stride: stride,
         step_mode: step,
         attributes: attrs,
-    }
+    })
 }
 
 impl FieldRenderer {
@@ -203,8 +206,10 @@ impl FieldRenderer {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("field"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bgl)],
+            // Push constants became "immediates", declared as a size rather than
+            // as ranges. This pipeline uses none.
+            immediate_size: 0,
         });
 
         // Straight alpha over the target — the field is drawn back to front
@@ -231,7 +236,7 @@ impl FieldRenderer {
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_node",
+                entry_point: Some("vs_node"),
                 compilation_options: Default::default(),
                 buffers: &[
                     vb(8, wgpu::VertexStepMode::Vertex, &quad_attrs),
@@ -244,7 +249,7 @@ impl FieldRenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_node",
+                entry_point: Some("fs_node"),
                 compilation_options: Default::default(),
                 targets: &target,
             }),
@@ -254,7 +259,7 @@ impl FieldRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -263,7 +268,7 @@ impl FieldRenderer {
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_edge",
+                entry_point: Some("vs_edge"),
                 compilation_options: Default::default(),
                 buffers: &[vb(
                     std::mem::size_of::<EdgeVertex>() as u64,
@@ -273,7 +278,7 @@ impl FieldRenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_edge",
+                entry_point: Some("fs_edge"),
                 compilation_options: Default::default(),
                 targets: &target,
             }),
@@ -283,7 +288,7 @@ impl FieldRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -292,7 +297,7 @@ impl FieldRenderer {
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_arrow",
+                entry_point: Some("vs_arrow"),
                 compilation_options: Default::default(),
                 buffers: &[
                     vb(8, wgpu::VertexStepMode::Vertex, &quad_attrs),
@@ -305,7 +310,7 @@ impl FieldRenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_arrow",
+                entry_point: Some("fs_arrow"),
                 compilation_options: Default::default(),
                 targets: &target,
             }),
@@ -315,7 +320,7 @@ impl FieldRenderer {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -542,24 +547,26 @@ mod tests {
     #[test]
     fn the_field_actually_paints_pixels() {
         let instance = wgpu::Instance::default();
-        let Some(adapter) =
+        // `request_adapter` returns a `Result` now — "no adapter" carries a
+        // reason. The skip stays a skip; only the shape changed.
+        let Ok(adapter) =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         else {
             eprintln!("no wgpu adapter — GPU leg skipped (CPU legs above still ran)");
             return;
         };
-        let (device, queue) = pollster::block_on(adapter.request_device(
-            &wgpu::DeviceDescriptor {
-                label: Some("field test"),
-                required_features: wgpu::Features::empty(),
-                // The WebGL2 tier, so a pass here means the browser backend
-                // is satisfiable too — testing against defaults would prove
-                // nothing about the target that actually matters.
-                required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
-                memory_hints: wgpu::MemoryHints::default(),
-            },
-            None,
-        ))
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("field test"),
+            required_features: wgpu::Features::empty(),
+            // The WebGL2 tier, so a pass here means the browser backend
+            // is satisfiable too — testing against defaults would prove
+            // nothing about the target that actually matters.
+            required_limits: wgpu::Limits::downlevel_webgl2_defaults(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::default(),
+            // The old trailing `None` argument, now a field.
+            trace: wgpu::Trace::Off,
+        }))
         .expect("device");
 
         let buf = crate::scene::tests_support::fixture();
@@ -607,6 +614,8 @@ mod tests {
                 label: Some("field"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
+                    // A 2-D target has no depth slice to select.
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         // Pure black clear, so ANY non-black pixel is paint.
@@ -615,21 +624,22 @@ mod tests {
                     },
                 })],
                 depth_stencil_attachment: None,
+                multiview_mask: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
             r.draw(&mut pass);
         }
         enc.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &tex,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &readback,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(bpr),
                     rows_per_image: Some(H),
@@ -645,8 +655,15 @@ mod tests {
 
         let slice = readback.slice(..);
         slice.map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::Maintain::Wait);
-        let data = slice.get_mapped_range();
+        // `poll` is `PollType` now and REPORTS whether the wait actually
+        // completed; `get_mapped_range` is fallible for the same reason. Both
+        // are unwrapped rather than ignored — a readback that silently returned
+        // an unmapped buffer would make the pixel count below read 0 and blame
+        // the pipeline for a mapping failure.
+        device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .expect("device poll");
+        let data = slice.get_mapped_range().expect("readback mapped");
         let painted = data
             .chunks_exact(4)
             .filter(|p| p[0] | p[1] | p[2] != 0)
