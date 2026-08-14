@@ -843,9 +843,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "glow"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
+checksum = "263218b0ba2b0715c3370fb04674f5f8aa331594b521c94ff0a8e4a8472d1386"
 dependencies = [
  "js-sys",
  "slotmap",
@@ -1185,6 +1185,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "macro_rules_attribute"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3ae8f6d608c795738406608304d30a2dfbdc8e58e44f7ba43236da5208ded3c"
+dependencies = [
+ "macro_rules_attribute-proc_macro",
+ "pastey",
+]
+
+[[package]]
+name = "macro_rules_attribute-proc_macro"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc04a4c58212d57930a24bf47d3fa87485264a3a054e9c10e042eb373573ad3c"
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1252,7 +1268,7 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -1277,7 +1293,7 @@ dependencies = [
 [[package]]
 name = "naga-types"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap",
@@ -1523,6 +1539,12 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "pastey"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ee67f1008b1ba2321834326597b8e186293b049a023cdef258527550b9935b4"
 
 [[package]]
 name = "percent-encoding"
@@ -2216,7 +2238,7 @@ dependencies = [
 [[package]]
 name = "wgpu"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -2245,7 +2267,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -2280,7 +2302,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-apple"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "wgpu-hal",
 ]
@@ -2288,7 +2310,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-emscripten"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "wgpu-hal",
 ]
@@ -2296,7 +2318,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-linux-android-bsd"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "wgpu-hal",
 ]
@@ -2304,7 +2326,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-wasm"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "wgpu-hal",
 ]
@@ -2312,7 +2334,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-windows"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "wgpu-hal",
 ]
@@ -2320,7 +2342,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -2375,7 +2397,7 @@ dependencies = [
 [[package]]
 name = "wgpu-naga-bridge"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "naga",
  "wgpu-types",
@@ -2384,12 +2406,13 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "30.0.0"
-source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#1f56415f14dfd8f64af0f2e1003dd30825015a5f"
+source = "git+https://github.com/AdaWorldAPI/wgpu?branch=trunk#0b87b295ebe71608d484872308aa69d29ac262e8"
 dependencies = [
  "bitflags",
  "bytemuck",
  "js-sys",
  "log",
+ "macro_rules_attribute",
  "naga-types",
  "raw-window-handle",
  "static_assertions",

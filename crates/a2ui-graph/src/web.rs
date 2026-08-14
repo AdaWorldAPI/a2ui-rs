@@ -137,11 +137,19 @@ impl FieldClient {
             .map_err(|e| JsValue::from_str(&format!("device: {e}")))?;
 
         let caps = surface.get_capabilities(&adapter);
+        // `is_srgb` was renamed `has_srgb_suffix` (upstream #9758) — a pure
+        // rename, and the clarified docs say why the old name misled: it
+        // reports whether the FORMAT applies sRGB encode/decode automatically,
+        // and says nothing about the colour space the contents are in. That is
+        // `SurfaceColorSpace` below, which this tier sets to `Auto`.
+        //
+        // The choice itself is unchanged: pick a non-Srgb format so the shader's
+        // output is written verbatim rather than encoded a second time.
         let format = caps
             .formats
             .iter()
             .copied()
-            .find(|f| !f.is_srgb())
+            .find(|f| !f.has_srgb_suffix())
             .unwrap_or(caps.formats[0]);
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
