@@ -293,35 +293,46 @@ impl FieldClient {
     /// and nothing else. A surface that is merely outdated is reconfigured
     /// and skipped; a lost one is reported, because silently drawing nothing
     /// forever is worse than a visible failure.
+    ///
+    /// # Acquisition comes FIRST, and that ordering is load-bearing
+    ///
+    /// A frame that cannot be presented must cost NOTHING — not a simulation
+    /// step, not an upload, and above all not a tick of the warm budget. When
+    /// the canvas is occluded (mounted under an overlay, or a hidden tab that
+    /// still gets callbacks), acquisition returns `Occluded` every time. If the
+    /// budget were spent before that was known, ~240 invisible callbacks would
+    /// drain it, [`Self::is_warm`] would go false, the driver would stop
+    /// scheduling, and REVEALING the canvas would show a half-settled field
+    /// frozen until the next gesture. Stepping only when a texture is in hand
+    /// makes `warm` mean "frames actually drawn", which is what the driver
+    /// contract wants it to mean.
     pub fn frame(&mut self) -> Result<(), JsValue> {
-        if self.warm > 0 {
-            self.layout.step();
-            self.scene.sync_positions(&self.layout);
-            self.warm -= 1;
-        }
-        self.renderer.upload(&self.queue, &self.scene, &self.camera);
-
         // `get_current_texture` no longer returns a `Result`: it returns a
         // 7-variant status, and the distinction it adds is real —
         // `Suboptimal` HANDS BACK a usable texture (a resize the compositor has
         // not caught up with), where the old API had to fold that into `Ok` and
         // lose it, or into `Err` and drop a frame that could have been drawn.
-        // So: draw it AND reconfigure, rather than choosing one.
-        let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(f) => f,
-            wgpu::CurrentSurfaceTexture::Suboptimal(f) => {
-                self.surface.configure(&self.device, &self.config);
-                f
-            }
-            // Recoverable: the swapchain is stale or gone. Reconfigure and skip
-            // this frame — the next one draws.
+        // So: draw it AND reconfigure — but in that ORDER, see below.
+        let (frame, stale_swapchain) = match self.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(f) => (f, false),
+            // Usable, but the swapchain wants recreating. The reconfigure is
+            // DEFERRED until after this texture is presented: `Surface::configure`
+            // documents a PANIC when "an old `SurfaceTexture` is still alive
+            // referencing an old surface", and a texture acquired one line above
+            // is exactly that. Reconfiguring here would take the field down on
+            // the most ordinary trigger there is — a window resize.
+            wgpu::CurrentSurfaceTexture::Suboptimal(f) => (f, true),
+            // Recoverable: the swapchain is stale or gone. Nothing is alive to
+            // invalidate, so reconfigure now and skip this frame — the next one
+            // draws.
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
                 return Ok(());
             }
             // Transient and NOT an error: the compositor is not showing us, or
             // the frame did not arrive in time. Reconfiguring here would be
-            // churn, so this frame is simply skipped.
+            // churn, so this frame is simply skipped — costing nothing, per the
+            // ordering note above.
             wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
                 return Ok(());
             }
@@ -331,6 +342,14 @@ impl FieldClient {
                 ));
             }
         };
+
+        if self.warm > 0 {
+            self.layout.step();
+            self.scene.sync_positions(&self.layout);
+            self.warm -= 1;
+        }
+        self.renderer.upload(&self.queue, &self.scene, &self.camera);
+
         let view = frame.texture.create_view(&Default::default());
         let mut enc = self.device.create_command_encoder(&Default::default());
         {
@@ -362,6 +381,12 @@ impl FieldClient {
         // Presentation moved from the texture to the QUEUE — it is a queue
         // operation, and the old `SurfaceTexture::present` hid that.
         self.queue.present(frame);
+        // NOW the deferred reconfigure: the texture is presented and no longer
+        // alive, so recreating the swapchain is safe. Next frame draws at the
+        // new size.
+        if stale_swapchain {
+            self.surface.configure(&self.device, &self.config);
+        }
         Ok(())
     }
 
