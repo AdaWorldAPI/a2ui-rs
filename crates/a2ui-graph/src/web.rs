@@ -75,6 +75,45 @@ const WARM_FRAMES: u32 = 240;
 /// target stays the same physical size at every zoom.
 const PICK_RADIUS_PX: f32 = 18.0;
 
+/// Does this browser hand back a real WebGPU adapter?
+///
+/// Asked through the DOM rather than through wgpu, because wgpu 30's
+/// `request_adapter` answers `Ok` on a browser that has none and only fails
+/// later, as an uncaught JS `TypeError` from inside the glue (see the call
+/// site). A `null` here is the same fact, delivered where it can be handled.
+///
+/// Every failure — no `window`, no `navigator.gpu`, a rejected promise, a
+/// `null` result — means the same thing to the caller: **no WebGPU**, use the
+/// GL path. There is nothing to report and nothing to retry, so they collapse
+/// to `false` rather than to an error the caller would have to flatten anyway.
+async fn webgpu_adapter_exists() -> bool {
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
+    let Ok(gpu) = js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("gpu")) else {
+        return false;
+    };
+    if gpu.is_undefined() || gpu.is_null() {
+        return false;
+    }
+    let Ok(request) = js_sys::Reflect::get(&gpu, &JsValue::from_str("requestAdapter")) else {
+        return false;
+    };
+    let Ok(request) = request.dyn_into::<js_sys::Function>() else {
+        return false;
+    };
+    let Ok(promise) = request.call0(&gpu) else {
+        return false;
+    };
+    let Ok(promise) = promise.dyn_into::<js_sys::Promise>() else {
+        return false;
+    };
+    match wasm_bindgen_futures::JsFuture::from(promise).await {
+        Ok(adapter) => !adapter.is_null() && !adapter.is_undefined(),
+        Err(_) => false,
+    }
+}
+
 impl FieldClient {
     /// Mount the field on a canvas over an ABI v3 byte stream.
     ///
@@ -93,13 +132,76 @@ impl FieldClient {
             .map_err(|e| JsValue::from_str(&format!("graph ABI: {e}")))?;
 
         let (w, h) = (canvas.width().max(1), canvas.height().max(1));
-        let instance = wgpu::Instance::default();
+        // The fallback has to be DRIVEN — it does not happen by itself.
+        //
+        // Measured 2026-08-14 in headless Chromium: `navigator.gpu` EXISTS,
+        // `navigator.gpu.requestAdapter()` returns nothing, and a fresh canvas
+        // gets a WebGL2 context without trouble. Against that browser a plain
+        // `Instance::default()` yields NO adapter at all — because a wgpu
+        // instance on wasm picks its context type ONCE, at creation: with
+        // `navigator.gpu` present it becomes the WebGPU context, and when that
+        // has no adapter the GL backend is never consulted. The `webgl`
+        // feature is compiled in and unreachable.
+        //
+        // That browser is not exotic. It is every environment where WebGPU is
+        // advertised but not actually usable — headless, old drivers, flags
+        // off, remote desktops — i.e. exactly the machines the WebGL2 path
+        // exists to serve.
+        //
+        // ── The decision happens BEFORE the canvas is touched ───────────────
+        //
+        // A canvas can hold exactly ONE context type, permanently. The first
+        // `create_surface` binds it — so a try-A-then-B loop over the same
+        // canvas cannot work: attempt two fails with
+        //
+        //     canvas.getContext() returned null; webgl2 not available or
+        //     canvas already in use
+        //
+        // and "already in use" means *we* used it. (Measured; it was the
+        // second failure this fix went through.) Cloning the handle does not
+        // help — it is the same element.
+        //
+        // So WebGPU is probed WITHOUT a surface. `compatible_surface: None`
+        // asks "does this browser have a working WebGPU adapter at all?"
+        // against nothing, leaving the canvas untouched for whichever backend
+        // wins.
+        // The probe asks the BROWSER, not wgpu — because wgpu's own answer is
+        // not trustworthy here.
+        //
+        // Measured 2026-08-14 under wgpu 30: on a browser whose
+        // `navigator.gpu.requestAdapter()` resolves to `null`, wgpu's
+        // `request_adapter` returns **`Ok`** — and the first use of that
+        // adapter (`adapter.limits()`) then throws
+        // `TypeError: Cannot read properties of null (reading 'limits')`
+        // straight out of the glue, past every Rust `Result`. Under wgpu 22
+        // the same call returned `None` and could be handled.
+        //
+        // So `is_ok()` is not a WebGPU-availability test on this version. The
+        // ground truth is one line of DOM: does `navigator.gpu` exist, and
+        // does it hand back an adapter that is not null.
+        let webgpu_works = webgpu_adapter_exists().await;
+
+        let (backend, backends) = if webgpu_works {
+            ("WebGPU", wgpu::Backends::BROWSER_WEBGPU)
+        } else {
+            ("WebGL2", wgpu::Backends::GL)
+        };
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .map_err(|e| JsValue::from_str(&format!("canvas surface: {e}")))?;
+            .map_err(|e| JsValue::from_str(&format!("canvas surface ({backend}): {e}")))?;
 
-        // THE line the probe named. `compatible_surface` is what makes wgpu
-        // offer its WebGL backend at all on wasm32.
+        // `compatible_surface` is what makes wgpu offer a backend for THIS
+        // canvas at all; without it the wasm32 WebGL backend is not offered
+        // even when it is compiled in.
+        //
+        // The error names the backend that was chosen and why. A bare
+        // "no adapter" cannot distinguish "this browser has no GPU path" from
+        // "we asked the wrong one", and that ambiguity is what hid the bug.
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
@@ -114,9 +216,15 @@ impl FieldClient {
             // Now a `Result` — "no adapter" carries a reason, which is worth
             // forwarding verbatim to a browser console that has no other clue.
             .await
+            // wgpu 30 turned this into a `Result`, so the upstream reason is
+            // available — and it is kept, next to the two facts only this call
+            // site knows: which backend was chosen, and what the surface-less
+            // probe said. Either half alone is ambiguous.
             .map_err(|e| {
                 JsValue::from_str(&format!(
-                    "no wgpu adapter for this canvas (WebGL2 missing?): {e}"
+                    "no wgpu adapter for this canvas via {backend} \
+                     (WebGPU adapter probe: {}): {e}",
+                    if webgpu_works { "present" } else { "absent" }
                 ))
             })?;
 
