@@ -47,18 +47,41 @@ and no warning.
 ## Build
 
 ```bash
-RUSTFLAGS='-C target-feature=+simd128' \
-  cargo build -p a2ui-graph --features web \
-              --target wasm32-unknown-unknown --release
+./scripts/build-graph-wasm.sh            # -> crates/a2ui-graph/pkg/
 ```
 
-Then the JS glue (needs `wasm-bindgen-cli` matching the `wasm-bindgen`
-dependency version):
+That is the whole thing. It runs what the two commands below do, and
+checks the four preconditions that otherwise fail silently or confusingly:
 
 ```bash
+RUSTFLAGS='-C target-feature=+simd128' \
+  cargo +1.97.1 build -p a2ui-graph --features web \
+              --target wasm32-unknown-unknown --release
+
 wasm-bindgen --target web --out-dir pkg \
   target/wasm32-unknown-unknown/release/a2ui_graph.wasm
 ```
+
+Output (measured 2026-08-14): a **4.1 MB** `.wasm`, ~105 KB of JS glue, and
+TypeScript declarations. It is a build artifact and is git-ignored —
+regenerated from the crate, never a source of truth.
+
+### What the script guards, and why each one is worth a check
+
+| Guard | The failure without it |
+|---|---|
+| `wasm-bindgen` CLI version == `Cargo.lock` pin | glue for a different ABI; surfaces at runtime, in a browser |
+| `wasm32-unknown-unknown` installed **for that toolchain** | `can't find crate for core` — reads like a broken install, is a one-line fix |
+| `FieldHandle` symbol present in the module | the client was linked out; see §"The two silent failures" |
+| toolchain pin (`1.97.1`, override with `RUST_TOOLCHAIN`) | a bare `cargo` names two different rust-version floors and no fix |
+
+Targets are **per-toolchain**, which is why the second one exists: switching
+toolchains loses the target, and the resulting error names neither.
+
+The script deliberately does **not** run `wasm-opt`. That is a size/time
+trade-off for the consumer to make; it is not a correctness step, and a
+build script that quietly changes the shipped bytes is worse than one that
+leaves the choice visible.
 
 Three things this command line depends on, each of which was a failure
 before it was a flag:
