@@ -219,24 +219,134 @@ impl Layout {
         }
 
         // 3. Integrate — gravity, damping, clamp, and the pin veto.
-        for i in 0..n {
-            if self.pinned[i] {
-                continue;
+        self.integrate(&fx, &fy);
+    }
+
+    /// The integrate sweep, **through the `ndarray::simd` polyfill**.
+    ///
+    /// # Why this one and not the other two
+    ///
+    /// Of the three phases in [`Layout::step`] this is the only *elementwise*
+    /// one: eight parallel lanes in, two out, no gather. Repulsion walks a
+    /// grid and springs scatter along an edge list — both are irregular, and
+    /// forcing lanes onto them would cost more in shuffles than the arithmetic
+    /// saves. Vectorising the sweep that is actually shaped for it, and saying
+    /// plainly why the others are left alone, beats a uniform claim.
+    ///
+    /// # Why the polyfill and not intrinsics
+    ///
+    /// Operator ruling 2026-08-14: *"wasm is via ndarray polyfill"*. One API
+    /// (`ndarray::simd::F32x16`) dispatches to AVX-512 / AVX2 / NEON /
+    /// **wasm32 SIMD128** / scalar. The browser therefore gets real SIMD128
+    /// (built with `-C target-feature=+simd128`) from the same source line the
+    /// native build vectorises — and the crate stays `forbid(unsafe_code)`,
+    /// because every intrinsic lives behind that boundary.
+    ///
+    /// Verified, not assumed — the dispatch is a `cfg`, so it is checkable:
+    ///
+    /// ```text
+    /// RUSTFLAGS='-C target-feature=+simd128' \
+    ///   cargo build -p a2ui-graph --target wasm32-unknown-unknown
+    /// llvm-objdump -d target/wasm32-unknown-unknown/debug/liba2ui_graph.rlib \
+    ///   | awk '/integrate/{f=1} f&&/^$/{f=0} f' | grep -cE 'f32x4|v128'
+    /// # 801   <- real SIMD128 in this function
+    ///
+    /// cargo build -p a2ui-graph --target wasm32-unknown-unknown   # no flag
+    /// llvm-objdump -d ... | grep -cE 'f32x4|v128'
+    /// # 0     <- scalar fallback, as the polyfill documents
+    /// ```
+    ///
+    /// # The pin veto is branchless
+    ///
+    /// A pinned node must not move. In a lane there is no `continue`, so the
+    /// veto becomes a `select`: compute the new value for every node, then
+    /// keep the old one wherever the node is pinned. Same result, no branch.
+    fn integrate(&mut self, fx: &[f32], fy: &[f32]) {
+        use ndarray::simd::F32x16;
+        const LANES: usize = 16;
+
+        let n = self.len();
+        let (gravity, damping, max_step) = (
+            F32x16::splat(GRAVITY),
+            F32x16::splat(DAMPING),
+            F32x16::splat(MAX_STEP),
+        );
+
+        let mut i = 0;
+        while i + LANES <= n {
+            let x = F32x16::from_slice(&self.xs[i..]);
+            let y = F32x16::from_slice(&self.ys[i..]);
+            let m = F32x16::from_slice(&self.mass[i..]);
+            // Gravity pulls toward the origin, scaled by mass — the same
+            // `f -= pos * GRAVITY * mass` as the scalar form, in lanes.
+            let fxl = F32x16::from_slice(&fx[i..]) - x * gravity * m;
+            let fyl = F32x16::from_slice(&fy[i..]) - y * gravity * m;
+
+            let vx = (F32x16::from_slice(&self.vx[i..]) + fxl / m) * damping;
+            let vy = (F32x16::from_slice(&self.vy[i..]) + fyl / m) * damping;
+
+            // Clamp the step length. `d` can be zero for a node at rest, so
+            // the scale is computed against a floored divisor and then
+            // SELECTED — dividing first and masking after would already have
+            // produced the inf/NaN the mask is meant to avoid.
+            let d = (vx * vx + vy * vy).sqrt();
+            let over = d.simd_gt(max_step);
+            let scale = over.select(
+                max_step / d.simd_max(F32x16::splat(1e-6)),
+                F32x16::splat(1.0),
+            );
+            let (dx, dy) = (vx * scale, vy * scale);
+
+            // The pin veto: keep the previous velocity and position wherever
+            // the node is pinned. The mask is built from `pinned` on the spot
+            // rather than kept as a mirrored f32 lane — a second copy of the
+            // same fact is a desync waiting to happen, and this costs 16
+            // byte reads that are already in cache.
+            let mut freebits = [0.0f32; LANES];
+            for (b, p) in freebits.iter_mut().zip(&self.pinned[i..i + LANES]) {
+                *b = f32::from(!*p);
             }
-            fx[i] -= self.xs[i] * GRAVITY * self.mass[i];
-            fy[i] -= self.ys[i] * GRAVITY * self.mass[i];
-            self.vx[i] = (self.vx[i] + fx[i] / self.mass[i]) * DAMPING;
-            self.vy[i] = (self.vy[i] + fy[i] / self.mass[i]) * DAMPING;
-            let (mut dx, mut dy) = (self.vx[i], self.vy[i]);
-            let d = (dx * dx + dy * dy).sqrt();
-            if d > MAX_STEP {
-                let s = MAX_STEP / d;
-                dx *= s;
-                dy *= s;
-            }
-            self.xs[i] += dx;
-            self.ys[i] += dy;
+            let free = F32x16::from_array(freebits).simd_gt(F32x16::splat(0.5));
+            free.select(vx, F32x16::from_slice(&self.vx[i..]))
+                .copy_to_slice(&mut self.vx[i..]);
+            free.select(vy, F32x16::from_slice(&self.vy[i..]))
+                .copy_to_slice(&mut self.vy[i..]);
+            free.select(x + dx, x).copy_to_slice(&mut self.xs[i..]);
+            free.select(y + dy, y).copy_to_slice(&mut self.ys[i..]);
+
+            i += LANES;
         }
+
+        // The tail — fewer than LANES nodes left. Same arithmetic, scalar.
+        while i < n {
+            self.integrate_one(i, fx[i], fy[i]);
+            i += 1;
+        }
+    }
+
+    /// One node's integrate step, scalar.
+    ///
+    /// This is the tail of the vector sweep AND the reference the parity test
+    /// measures the lanes against — one definition, so the two cannot drift.
+    fn integrate_one(&mut self, i: usize, fx: f32, fy: f32) {
+        if self.pinned[i] {
+            return;
+        }
+        let (fx, fy) = (
+            fx - self.xs[i] * GRAVITY * self.mass[i],
+            fy - self.ys[i] * GRAVITY * self.mass[i],
+        );
+        self.vx[i] = (self.vx[i] + fx / self.mass[i]) * DAMPING;
+        self.vy[i] = (self.vy[i] + fy / self.mass[i]) * DAMPING;
+        let (mut dx, mut dy) = (self.vx[i], self.vy[i]);
+        let d = (dx * dx + dy * dy).sqrt();
+        if d > MAX_STEP {
+            let s = MAX_STEP / d;
+            dx *= s;
+            dy *= s;
+        }
+        self.xs[i] += dx;
+        self.ys[i] += dy;
     }
 
     /// Run `k` steps — the settle a first frame does before it is shown.
@@ -398,5 +508,82 @@ mod tests {
     #[test]
     fn an_empty_layout_has_no_bounds() {
         assert_eq!(Layout::seeded(0, vec![], &[]).bounds(), None);
+    }
+
+    /// The SIMD sweep and the scalar reference must agree.
+    ///
+    /// This is the only test that can catch a lane bug, because every other
+    /// test asserts a *property* of the layout (it spreads, it is
+    /// deterministic) that a subtly wrong lane still satisfies. The pin veto
+    /// especially: a `select` with inverted polarity moves exactly the nodes
+    /// that must not move, and the ring would still relax outward.
+    ///
+    /// CAN FIRE: invert the `free` mask, drop the `- x * gravity * m` term, or
+    /// let the tail start at the wrong index — each shows up here and nowhere
+    /// else.
+    #[test]
+    fn the_vector_sweep_agrees_with_the_scalar_reference() {
+        // 37 nodes: two full 16-lanes plus a 5-node tail, so the tail path is
+        // exercised. A multiple of 16 would leave it untested.
+        let n = 37;
+        let mut vector = ring(n);
+        let mut scalar = ring(n);
+        // Pin a few, including one inside each lane and one in the tail, so
+        // the veto is measured in both paths.
+        for i in [0usize, 7, 16, 20, 35] {
+            vector.pinned[i] = true;
+            scalar.pinned[i] = true;
+        }
+
+        // A force field that is neither zero nor uniform — a constant one
+        // would hide an indexing bug, since every lane would read the same.
+        let fx: Vec<f32> = (0..n).map(|i| (i as f32) * 0.7 - 9.0).collect();
+        let fy: Vec<f32> = (0..n).map(|i| 4.0 - (i as f32) * 0.3).collect();
+
+        vector.integrate(&fx, &fy);
+        for i in 0..n {
+            scalar.integrate_one(i, fx[i], fy[i]);
+        }
+
+        for i in 0..n {
+            // Tolerance, not equality: the polyfill documents that `mul_add`
+            // and reduction ORDER may differ by an ULP across backends, and
+            // this test must pass on wasm32 SIMD128 and NEON too, not only on
+            // the machine that wrote it.
+            for (a, b, lane) in [
+                (vector.xs[i], scalar.xs[i], "xs"),
+                (vector.ys[i], scalar.ys[i], "ys"),
+                (vector.vx[i], scalar.vx[i], "vx"),
+                (vector.vy[i], scalar.vy[i], "vy"),
+            ] {
+                assert!(
+                    (a - b).abs() <= 1e-4 * b.abs().max(1.0),
+                    "node {i} lane {lane}: vector {a} vs scalar {b}"
+                );
+            }
+        }
+    }
+
+    /// A pinned node does not move — stated on its own, so the guarantee is
+    /// not merely implied by the parity test above.
+    ///
+    /// CAN STAY SILENT: this is the half that fails if the veto is dropped
+    /// entirely (parity would still hold, since both paths would move it).
+    #[test]
+    fn a_pinned_node_holds_its_position_through_the_vector_sweep() {
+        let n = 20;
+        let mut l = ring(n);
+        l.pinned[3] = true;
+        let (px, py) = (l.xs[3], l.ys[3]);
+        let fx = vec![50.0f32; n];
+        let fy = vec![-50.0f32; n];
+        l.integrate(&fx, &fy);
+        assert_eq!((l.xs[3], l.ys[3]), (px, py), "a pinned node moved");
+        // ...and the test is not vacuous: an UNPINNED node under the same
+        // force must have moved.
+        assert!(
+            (l.xs[4] - ring(n).xs[4]).abs() > 1e-3,
+            "nothing moved at all — the sweep did nothing and the assert above proves nothing"
+        );
     }
 }

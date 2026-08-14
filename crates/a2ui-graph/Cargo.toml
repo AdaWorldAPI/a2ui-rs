@@ -12,6 +12,20 @@ description = "a2ui-rs graph lane — the GPU renderer of the node/edge FIELD. D
 # Instance/vertex buffers are #[repr(C)] Pod structs cast to bytes — the ONE
 # sanctioned cast, so the crate stays forbid(unsafe_code).
 bytemuck = { version = "1", features = ["derive"] }
+# The SIMD polyfill. Operator ruling 2026-08-14: *"wasm is via ndarray
+# polyfill"* — the per-frame CPU arithmetic goes through `ndarray::simd`, which
+# dispatches to AVX-512 / AVX2 / NEON / **wasm32 SIMD128** / scalar behind ONE
+# API. Writing the intrinsics here (or trusting the autovectorizer to find
+# them) is the workspace-wide violation the `simd-savant` invariant names:
+# consumer crates take their SIMD from `ndarray::simd`, never their own.
+#
+# `default-features = false` + `std` — the lane types live behind `std`
+# (`ndarray/src/lib.rs`: `#[cfg(feature = "std")] pub mod simd`), so `std` is
+# the minimum that exposes them; `hpc-extras` stays off because this crate
+# wants the polyfill and nothing else, and the wasm build must stay small.
+# AdaWorldAPI fork, never crates.io (lance-graph P0). Default branch is
+# `master`, not `main`.
+ndarray = { git = "https://github.com/AdaWorldAPI/ndarray", branch = "master", default-features = false, features = ["std"] }
 # The GPU draw — OFF by default. The data path (ABI view, layout, scene,
 # hit-test, interaction grammar) is pure and testable without a device.
 wgpu = { version = "22", optional = true }

@@ -1,0 +1,18 @@
+# Local development override — NOT part of the shipped build.
+#
+# Operator ruling 2026-08-14: *"wasm is via ndarray polyfill"*, and the
+# workspace rule that every AdaWorldAPI repo is checked out locally means the
+# LOCAL source is authoritative over a git fetch (lance-graph `CLAUDE.md` P0:
+# *"Every repo in this workspace is local — prefer the local/fork source over
+# the registry, always"*).
+#
+# The manifests keep the `git = ".../AdaWorldAPI/ndarray"` coordinates so a
+# clean clone and the Railway image (whose Dockerfile copies only
+# `Cargo.toml`, `Cargo.lock` and `crates/`, never this file) resolve the fork
+# from GitHub. Here, this redirects that same coordinate to the sibling
+# checkout, so an edit in ndarray is visible immediately instead of after a
+# push + `cargo update`.
+#
+# Sibling layout assumed: `<root>/a2ui-rs` next to `<root>/ndarray`.
+[patch."https://github.com/AdaWorldAPI/ndarray"]
+ndarray = { path = "../ndarray" }
