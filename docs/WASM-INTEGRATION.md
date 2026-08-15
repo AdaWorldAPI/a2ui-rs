@@ -126,24 +126,6 @@ const bytes = new Uint8Array(await (await fetch('/graph.abi')).arrayBuffer());
 const field = await FieldHandle.mount(canvas, bytes);
 console.log(field.backend, simd128Enabled()); // actual draw path; build receipt
 
-canvas.addEventListener('pointerdown', e => {
-  const hit = field.pointerDown(e.offsetX, e.offsetY);
-  if (hit) openPreview(hit.classid, hit.identity);   // an ADDRESS, not a handler
-  wake();
-});
-canvas.addEventListener('pointermove', e => {
-  field.pointerMove(e.offsetX, e.offsetY);
-  wake();
-});
-canvas.addEventListener('pointerup', () => {
-  field.pointerUp();
-  wake();
-});
-canvas.addEventListener('wheel', e => {
-  field.zoom(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.1 : 0.9);
-  wake();
-});
-
 let scheduled = false;
 function wake() {
   if (scheduled) return;
@@ -155,11 +137,44 @@ function frame() {
   field.frame();
   if (field.isWarm()) wake();
 }
+function mutate(operation) {
+  const result = operation();
+  wake();
+  return result;
+}
+
+canvas.addEventListener('pointerdown', e => {
+  const hit = mutate(() => field.pointerDown(e.offsetX, e.offsetY));
+  if (hit) openPreview(hit.classid, hit.identity);   // an ADDRESS, not a handler
+});
+canvas.addEventListener('pointermove', e => {
+  mutate(() => field.pointerMove(e.offsetX, e.offsetY));
+});
+canvas.addEventListener('pointerup', () => {
+  mutate(() => field.pointerUp());
+});
+canvas.addEventListener('wheel', e => {
+  mutate(() => field.zoom(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.1 : 0.9));
+});
+
+// These calls mutate state too. Keep them behind the same wake boundary so a
+// settled field cannot remain visually stale until the next pointer gesture.
+const actions = {
+  spread: (seed, hops) => mutate(() => field.spread(seed, hops)),
+  trace: (from, to) => mutate(() => field.trace(from, to)),
+  clear: () => mutate(() => field.clear()),
+  resize: (width, height) => mutate(() => field.resize(width, height)),
+};
 wake();
 
 // The one thing Rust cannot reclaim for you:
 // removeEventListener(...) then field.detach();
 ```
+
+The demand-driven loop has one non-negotiable consumer rule: every mutating
+field call wakes it. That includes gestures and also `spread`, `trace`,
+`clear`, and `resize`; wrapping them once avoids a stale canvas after the
+field has gone cold.
 
 For an explicit diagnostic or user preference, use the same ABI and request
 one backend by name:
