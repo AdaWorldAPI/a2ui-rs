@@ -48,8 +48,6 @@ wgpu = { workspace = true, optional = true }
 # old comment claimed is now enforced by the target, not by a promise.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
 # The WebGL2 fallback, always on for wasm32. wgpu tries WebGPU first and
 # falls back; without this feature there is no fallback at all, and on the
 # machines this tier exists to serve that means no renderer — not a slower
