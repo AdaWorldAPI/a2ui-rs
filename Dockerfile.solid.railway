@@ -51,12 +51,35 @@ RUN apt-get update \
 
 WORKDIR /src
 
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.toml ./
 COPY crates ./crates
 
-# `--locked` fails loudly rather than re-resolving. If this errors the lock is
-# stale: fix it in a commit, never by dropping the flag.
-RUN cargo build --release --locked -p ${BIN_NAME} \
+# NO `Cargo.lock`, NO `--locked` — the deps FLOAT here, on purpose.
+#
+# Every dependency that matters is a git branch coordinate: ndarray on
+# `master`, OGAR on `main`, wgpu on `trunk`. This image resolves them fresh on
+# every build, so a push to any of those siblings reaches the next deploy
+# without a lock bump, a rev edit, or a commit in this repo. That is the
+# intended development property, not a concession.
+#
+# `--locked` is the exact opposite instruction — it forbids re-resolution — so
+# it can never be reinstated while floating is wanted. It also could not have
+# worked even if it were: `.cargo/config.toml` is tracked and patches ndarray to
+# `path = "../ndarray"`, so a lock committed from a dev checkout records ndarray
+# with NO `source` at all, and this image (which deliberately does not copy that
+# file) must resolve the same coordinate from git. Different source, same
+# package; `--locked` fails on that every build, and the `../ndarray` path does
+# not exist in here either.
+#
+# The lock is not copied for the same reason. Copying it would pin the git revs
+# it happens to hold, re-freezing what the branch coordinates exist to keep
+# moving — and once the lock is untracked, naming it in a `COPY` is a missing
+# build-context source, which fails the build outright.
+#
+# If a specific deploy ever needs to be reproducible, pin it where a reader can
+# see it — an explicit `rev = "..."` on the dependency — not by reintroducing a
+# lock whose contents nobody reviews.
+RUN cargo build --release -p ${BIN_NAME} \
  && cp target/release/${BIN_NAME} /usr/local/bin/a2ui-solid-web
 
 # ── runtime ────────────────────────────────────────────────────────────────
