@@ -63,8 +63,8 @@ wasm-bindgen --target web --out-dir pkg \
 ```
 
 **Kein `--features` mehr** (operator, 2026-08-14: wasm ist der Standard).
-Ein `wasm32`-Build IST ein Browser-Build: `wasm-bindgen`, `js-sys`,
-`web-sys` und wgpus WebGL2-Fallback sind *target*-gated statt
+Ein `wasm32`-Build IST ein Browser-Build: `wasm-bindgen`, `web-sys` und
+wgpus JS-/WebGL2-Pfade sind *target*-gated statt
 feature-gated, und `wgpu` ist Default. Gemessen an einem Build ganz ohne
 Flags: **133 `FieldHandle`-Symbole, 13 594 SIMD-Instruktionen.**
 
@@ -118,29 +118,62 @@ would be a feature that compiles and cannot draw.
 ## Using it from JS
 
 ```js
-import init, { FieldHandle } from './pkg/a2ui_graph.js';
+import init, { FieldHandle, simd128Enabled } from './pkg/a2ui_graph.js';
 
 await init();
 
 const bytes = new Uint8Array(await (await fetch('/graph.abi')).arrayBuffer());
 const field = await FieldHandle.mount(canvas, bytes);
+console.log(field.backend, simd128Enabled()); // actual draw path; build receipt
 
 canvas.addEventListener('pointerdown', e => {
   const hit = field.pointerDown(e.offsetX, e.offsetY);
   if (hit) openPreview(hit.classid, hit.identity);   // an ADDRESS, not a handler
+  wake();
 });
-canvas.addEventListener('pointermove', e => field.pointerMove(e.offsetX, e.offsetY));
-canvas.addEventListener('pointerup',   () => field.pointerUp());
-canvas.addEventListener('wheel', e => field.zoom(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.1 : 0.9));
+canvas.addEventListener('pointermove', e => {
+  field.pointerMove(e.offsetX, e.offsetY);
+  wake();
+});
+canvas.addEventListener('pointerup', () => {
+  field.pointerUp();
+  wake();
+});
+canvas.addEventListener('wheel', e => {
+  field.zoom(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.1 : 0.9);
+  wake();
+});
 
-(function frame() {
-  field.frame();
+let scheduled = false;
+function wake() {
+  if (scheduled) return;
+  scheduled = true;
   requestAnimationFrame(frame);
-})();
+}
+function frame() {
+  scheduled = false;
+  field.frame();
+  if (field.isWarm()) wake();
+}
+wake();
 
 // The one thing Rust cannot reclaim for you:
 // removeEventListener(...) then field.detach();
 ```
+
+For an explicit diagnostic or user preference, use the same ABI and request
+one backend by name:
+
+```js
+const field = await FieldHandle.mountWithBackend(canvas, bytes, 'webgpu');
+// 'auto' may fall back; forced 'webgpu' and 'webgl2' fail loudly.
+console.log(field.backend); // what actually acquired the canvas
+```
+
+The backend must be chosen before mounting. A canvas can acquire only one
+context family, so a try-WebGPU-then-WebGL2 loop over the same element is not
+a fallback. `mountWithBackend` and `mount` both resolve the choice before
+`create_surface`; `mount` is exactly the `auto` policy.
 
 ### Why the JS surface has its own shape
 
@@ -158,6 +191,10 @@ Two deliberate choices at that boundary:
 - **`trace` returns an empty array, never `null`.** "No path" and "a path of
   no nodes" are the same thing to a renderer, and an *either-array-or-null*
   return is a forgotten null-check waiting to happen.
+- **Capability and activation have separate receipts.** Browser-side feature
+  detection answers whether SIMD/WebGPU can exist. `simd128Enabled()` answers
+  whether this module was actually built with ndarray's SIMD128 arm, while
+  `field.backend` answers which GPU path acquired this canvas.
 
 ### Memory
 

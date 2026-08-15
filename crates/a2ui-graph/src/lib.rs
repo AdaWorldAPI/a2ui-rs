@@ -38,9 +38,10 @@
 //!                                        wgpu draw (WebGPU / WebGL2)
 //! ```
 //!
-//! Every stage below the draw is pure and testable with no GPU, which is why
-//! the `wgpu` feature is off by default: the arithmetic is what can be wrong;
-//! the device only executes it.
+//! Every stage below the draw is pure and testable with no GPU. The renderer
+//! is on by default because drawing is this crate's purpose; data-path-only
+//! consumers can still select `default-features = false` to test or reuse the
+//! arithmetic without a device.
 
 #![forbid(unsafe_code)]
 

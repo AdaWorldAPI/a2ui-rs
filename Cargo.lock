@@ -14,11 +14,9 @@ name = "a2ui-graph"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "js-sys",
  "ndarray",
  "pollster",
  "wasm-bindgen",
- "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
 ]

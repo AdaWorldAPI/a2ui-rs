@@ -51,6 +51,84 @@ pub struct Picked {
     pub address: (u32, u32),
 }
 
+/// Which browser GPU path a consumer asks the field to use.
+///
+/// This is a render-side preference only. It never changes the addressed ABI,
+/// the ClassView codebook or the server projection. `Auto` preserves the
+/// production policy; the explicit variants exist for diagnostics and for a
+/// reversible user preference.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum BackendPreference {
+    /// Prefer WebGPU when the browser returns a real adapter, otherwise use
+    /// the WebGL2 backend compiled into wgpu.
+    #[default]
+    Auto,
+    /// Require browser WebGPU. Failure is returned instead of falling back.
+    WebGpu,
+    /// Require the WebGL2 fallback without probing or touching WebGPU.
+    WebGl2,
+}
+
+impl BackendPreference {
+    fn parse(value: &str) -> Result<Self, JsValue> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Ok(Self::Auto),
+            "webgpu" => Ok(Self::WebGpu),
+            "webgl2" => Ok(Self::WebGl2),
+            _ => Err(JsValue::from_str(
+                "backend must be one of: auto, webgpu, webgl2",
+            )),
+        }
+    }
+
+    async fn resolve(self) -> Result<FieldBackend, JsValue> {
+        match self {
+            Self::Auto => {
+                if wgpu::util::is_browser_webgpu_supported().await {
+                    Ok(FieldBackend::WebGpu)
+                } else {
+                    Ok(FieldBackend::WebGl2)
+                }
+            }
+            Self::WebGpu => {
+                if wgpu::util::is_browser_webgpu_supported().await {
+                    Ok(FieldBackend::WebGpu)
+                } else {
+                    Err(JsValue::from_str(
+                        "WebGPU was required, but navigator.gpu did not return an adapter",
+                    ))
+                }
+            }
+            Self::WebGl2 => Ok(FieldBackend::WebGl2),
+        }
+    }
+}
+
+/// The backend that actually owns the field's canvas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldBackend {
+    /// The browser WebGPU backend.
+    WebGpu,
+    /// wgpu's GLES/WebGL2 backend.
+    WebGl2,
+}
+
+impl FieldBackend {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::WebGpu => "WebGPU",
+            Self::WebGl2 => "WebGL2",
+        }
+    }
+
+    const fn wgpu_backends(self) -> wgpu::Backends {
+        match self {
+            Self::WebGpu => wgpu::Backends::BROWSER_WEBGPU,
+            Self::WebGl2 => wgpu::Backends::GL,
+        }
+    }
+}
+
 /// The live field on a canvas: device, surface, scene, layout, camera.
 pub struct FieldClient {
     device: wgpu::Device,
@@ -61,6 +139,10 @@ pub struct FieldClient {
     scene: Scene,
     layout: Layout,
     camera: Camera,
+    /// The backend that actually acquired this canvas. Kept as evidence for
+    /// the consumer: `navigator.gpu` being present is not the same fact as the
+    /// field being routed through WebGPU.
+    backend: FieldBackend,
     /// The node currently held, if any — the drag.
     dragging: Option<u32>,
     /// Frames of simulation still owed. A settled field costs nothing per
@@ -75,45 +157,6 @@ const WARM_FRAMES: u32 = 240;
 /// target stays the same physical size at every zoom.
 const PICK_RADIUS_PX: f32 = 18.0;
 
-/// Does this browser hand back a real WebGPU adapter?
-///
-/// Asked through the DOM rather than through wgpu, because wgpu 30's
-/// `request_adapter` answers `Ok` on a browser that has none and only fails
-/// later, as an uncaught JS `TypeError` from inside the glue (see the call
-/// site). A `null` here is the same fact, delivered where it can be handled.
-///
-/// Every failure — no `window`, no `navigator.gpu`, a rejected promise, a
-/// `null` result — means the same thing to the caller: **no WebGPU**, use the
-/// GL path. There is nothing to report and nothing to retry, so they collapse
-/// to `false` rather than to an error the caller would have to flatten anyway.
-async fn webgpu_adapter_exists() -> bool {
-    let Some(window) = web_sys::window() else {
-        return false;
-    };
-    let Ok(gpu) = js_sys::Reflect::get(&window.navigator(), &JsValue::from_str("gpu")) else {
-        return false;
-    };
-    if gpu.is_undefined() || gpu.is_null() {
-        return false;
-    }
-    let Ok(request) = js_sys::Reflect::get(&gpu, &JsValue::from_str("requestAdapter")) else {
-        return false;
-    };
-    let Ok(request) = request.dyn_into::<js_sys::Function>() else {
-        return false;
-    };
-    let Ok(promise) = request.call0(&gpu) else {
-        return false;
-    };
-    let Ok(promise) = promise.dyn_into::<js_sys::Promise>() else {
-        return false;
-    };
-    match wasm_bindgen_futures::JsFuture::from(promise).await {
-        Ok(adapter) => !adapter.is_null() && !adapter.is_undefined(),
-        Err(_) => false,
-    }
-}
-
 impl FieldClient {
     /// Mount the field on a canvas over an ABI v3 byte stream.
     ///
@@ -121,12 +164,26 @@ impl FieldClient {
     /// adapter request carrying it. Reversing them costs the WebGL2 backend.
     ///
     /// # Errors
-    /// If the stream is not v3, if no adapter satisfies a WebGL2-capable
-    /// device, or if the canvas cannot back a surface. Each is returned, none
-    /// is papered over with a blank canvas.
+    /// If the stream is not v3, if no adapter satisfies the selected backend,
+    /// or if the canvas cannot back a surface. Each is returned, none is
+    /// papered over with a blank canvas.
     pub async fn mount(
         canvas: web_sys::HtmlCanvasElement,
         abi_bytes: &[u8],
+    ) -> Result<Self, JsValue> {
+        Self::mount_with_preference(canvas, abi_bytes, BackendPreference::Auto).await
+    }
+
+    /// Mount with an explicit browser backend preference.
+    ///
+    /// The choice is resolved before `create_surface`: a canvas can acquire
+    /// only one context family, so trying WebGPU and then WebGL2 on the same
+    /// element is not a fallback. Explicit choices fail loudly and `Auto`
+    /// probes first, preserving the canvas for the backend that wins.
+    pub async fn mount_with_preference(
+        canvas: web_sys::HtmlCanvasElement,
+        abi_bytes: &[u8],
+        preference: BackendPreference,
     ) -> Result<Self, JsValue> {
         let abi = GraphAbi::parse(abi_bytes)
             .map_err(|e| JsValue::from_str(&format!("graph ABI: {e}")))?;
@@ -164,9 +221,8 @@ impl FieldClient {
         // So WebGPU is probed WITHOUT a surface. `compatible_surface: None`
         // asks "does this browser have a working WebGPU adapter at all?"
         // against nothing, leaving the canvas untouched for whichever backend
-        // wins.
-        // The probe asks the BROWSER, not wgpu — because wgpu's own answer is
-        // not trustworthy here.
+        // wins. `wgpu::util` performs that DOM-level probe before an Instance
+        // exists; it does not confuse an enabled backend with an adapter.
         //
         // Measured 2026-08-14 under wgpu 30: on a browser whose
         // `navigator.gpu.requestAdapter()` resolves to `null`, wgpu's
@@ -176,16 +232,12 @@ impl FieldClient {
         // straight out of the glue, past every Rust `Result`. Under wgpu 22
         // the same call returned `None` and could be handled.
         //
-        // So `is_ok()` is not a WebGPU-availability test on this version. The
-        // ground truth is one line of DOM: does `navigator.gpu` exist, and
-        // does it hand back an adapter that is not null.
-        let webgpu_works = webgpu_adapter_exists().await;
-
-        let (backend, backends) = if webgpu_works {
-            ("WebGPU", wgpu::Backends::BROWSER_WEBGPU)
-        } else {
-            ("WebGL2", wgpu::Backends::GL)
-        };
+        // The fork translates a null adapter into `RequestAdapterError` and
+        // exposes this exact pre-instance probe as a public utility. Keep one
+        // implementation of that boundary: a2ui owns the routing policy,
+        // wgpu owns what a browser adapter result means.
+        let backend = preference.resolve().await?;
+        let backends = backend.wgpu_backends();
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
@@ -193,7 +245,9 @@ impl FieldClient {
         });
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .map_err(|e| JsValue::from_str(&format!("canvas surface ({backend}): {e}")))?;
+            .map_err(|e| {
+                JsValue::from_str(&format!("canvas surface ({}): {e}", backend.name()))
+            })?;
 
         // `compatible_surface` is what makes wgpu offer a backend for THIS
         // canvas at all; without it the wasm32 WebGL backend is not offered
@@ -223,8 +277,8 @@ impl FieldClient {
             .map_err(|e| {
                 JsValue::from_str(&format!(
                     "no wgpu adapter for this canvas via {backend} \
-                     (WebGPU adapter probe: {}): {e}",
-                    if webgpu_works { "present" } else { "absent" }
+                     (requested preference: {preference:?}): {e}",
+                    backend = backend.name()
                 ))
             })?;
 
@@ -299,6 +353,7 @@ impl FieldClient {
             scene,
             layout,
             camera,
+            backend,
             dragging: None,
             warm: WARM_FRAMES,
         })
@@ -505,6 +560,12 @@ impl FieldClient {
         self.warm > 0
     }
 
+    /// The backend that actually acquired the canvas.
+    #[must_use]
+    pub const fn backend(&self) -> FieldBackend {
+        self.backend
+    }
+
     /// Release the GPU side deterministically.
     ///
     /// Dropping the client already frees device, surface and every buffer —
@@ -592,8 +653,8 @@ impl FieldHandle {
     ///
     /// # Errors
     /// Propagates every failure [`FieldClient::mount`] reports: a stream that
-    /// is not v3, no WebGL2-capable adapter, or a canvas that cannot back a
-    /// surface. None is papered over with a blank canvas.
+    /// is not v3, no adapter for the selected backend, or a canvas that cannot
+    /// back a surface. None is papered over with a blank canvas.
     #[wasm_bindgen]
     pub async fn mount(
         canvas: web_sys::HtmlCanvasElement,
@@ -604,6 +665,28 @@ impl FieldHandle {
         // release. One copy at mount, never per frame.
         let inner = FieldClient::mount(canvas, &abi_bytes).await?;
         Ok(FieldHandle { inner })
+    }
+
+    /// Mount through `auto`, `webgpu` or `webgl2` explicitly.
+    ///
+    /// This is the diagnostic/user-preference seam. An unsupported forced
+    /// backend is an error; only `auto` may fall back.
+    #[wasm_bindgen(js_name = mountWithBackend)]
+    pub async fn mount_with_backend(
+        canvas: web_sys::HtmlCanvasElement,
+        abi_bytes: Vec<u8>,
+        backend: String,
+    ) -> Result<FieldHandle, JsValue> {
+        let preference = BackendPreference::parse(&backend)?;
+        let inner = FieldClient::mount_with_preference(canvas, &abi_bytes, preference).await?;
+        Ok(FieldHandle { inner })
+    }
+
+    /// The backend that actually acquired this canvas: `WebGPU` or `WebGL2`.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn backend(&self) -> String {
+        self.inner.backend().name().to_string()
     }
 
     /// Press at a screen point. Returns the node it landed on, if any.
@@ -697,4 +780,14 @@ impl FieldHandle {
     pub fn detach(self) {
         self.inner.detach();
     }
+}
+
+/// Whether this module was compiled with ndarray's wasm32 SIMD128 path.
+///
+/// Browser SIMD support and build activation are different facts. The
+/// diagnostics page probes the former; this receipt exposes the latter.
+#[wasm_bindgen(js_name = simd128Enabled)]
+#[must_use]
+pub fn simd128_enabled() -> bool {
+    cfg!(target_feature = "simd128")
 }
