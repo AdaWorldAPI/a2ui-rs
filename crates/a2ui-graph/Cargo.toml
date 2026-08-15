@@ -48,6 +48,13 @@ wgpu = { workspace = true, optional = true }
 # old comment claimed is now enforced by the target, not by a promise.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
+# `#[wasm_bindgen]` on an `impl` block with async methods (FieldHandle::mount)
+# expands to code that calls `wasm_bindgen_futures::future_to_promise` to wrap
+# the Future as a JS Promise. That expansion lives IN this crate's generated
+# code, so `wasm-bindgen-futures` must be a direct dependency here, not just
+# available transitively (wgpu's web backend pulls it in, which is why it
+# built at all before failing to link into a2ui-graph's own crate root).
+wasm-bindgen-futures = "0.4"
 # The WebGL2 fallback, always on for wasm32. wgpu tries WebGPU first and
 # falls back; without this feature there is no fallback at all, and on the
 # machines this tier exists to serve that means no renderer — not a slower
