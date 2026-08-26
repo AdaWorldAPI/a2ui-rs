@@ -1,0 +1,19 @@
+[package]
+name = "a2ui-field-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs field demo — serves ONE MGRA v3 stream and the a2ui-graph wasm client that draws it. The stream is read from a path at startup and validated before it is ever served; no graph bytes live in this repo."
+
+[dependencies]
+# The wire parser, server-side, for VALIDATION only: a stream is parsed once at
+# startup so a bad one is refused with its reason instead of reaching the
+# browser as a blank canvas. `default-features = false` drops `wgpu` — the
+# drawing happens in the client's wasm, never here.
+a2ui-graph = { path = "../a2ui-graph", default-features = false }
+
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs"] }
