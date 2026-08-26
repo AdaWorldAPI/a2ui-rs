@@ -311,6 +311,18 @@ impl<'a> GraphAbi<'a> {
         self.edge_at(i)[8]
     }
 
+    /// Every node's `(classid, identity)`, in lane order.
+    ///
+    /// Exists because a consumer that only borrows the stream — the browser
+    /// client does, and drops it after mount — cannot lens the node lane once
+    /// the bytes are gone. Resolving the whole table while the view is alive
+    /// is the honest alternative to retaining a multi-megabyte stream for the
+    /// eight bytes per node a pick actually reads.
+    #[must_use]
+    pub fn addresses(&self) -> Box<[(u32, u32)]> {
+        (0..self.node_count).map(|i| self.address(i)).collect()
+    }
+
     /// Every edge whose BOTH endpoints are inside the node lane.
     ///
     /// A ghost edge (an ordinal past `node_count`) would index a GPU buffer
@@ -470,5 +482,61 @@ mod tests {
         assert_eq!(g.edge_count(), 3, "the header still declares all three");
         assert_eq!(g.edge_pairs(), vec![[0, 1]], "only the real one survives");
         assert_eq!(g.degrees(), vec![1, 1], "the ghosts add no degree");
+    }
+}
+
+#[cfg(test)]
+mod address_table_tests {
+    use super::*;
+    use crate::scene::tests_support::fixture;
+
+    /// **A pick reports the node's real address, not a placeholder.**
+    ///
+    /// `web::FieldClient` reported `(0, 0)` for every pick: `Gesture::Down`
+    /// built `Picked { address: (0, 0) }` literally, and `address_of` — the
+    /// resolver that would have filled it — had no callers anywhere in the
+    /// crate. Live symptom on the shipped MedCare field: three different
+    /// ordinals (36148, 5288, 3398) all reported `classid 0x00000000`, so the
+    /// body-localisation lookup was handed a zero address and answered "keine
+    /// Anatomie von dieser Adresse erreichbar" every time. The stream itself
+    /// was fine — measured on the live `wave.abi`, 0 of 38 751 nodes carry a
+    /// zero classid.
+    ///
+    /// The table lives here rather than in `web` because `web` is
+    /// `cfg(target_arch = "wasm32")`: a resolver defined there cannot be
+    /// reached by a native test at all, which is how a hardcoded `(0, 0)`
+    /// survived in the first place.
+    ///
+    /// CAN FIRE: return `(0, 0)` from `addresses`, or index the wrong node —
+    /// the ordinals below carry distinct classid AND identity, so neither a
+    /// constant nor an off-by-one passes.
+    #[test]
+    fn every_ordinal_resolves_to_its_own_address() {
+        let buf = fixture();
+        let abi = GraphAbi::parse(&buf).expect("fixture parses");
+        let table = abi.addresses();
+
+        assert_eq!(table.len(), abi.node_count());
+        for i in 0..abi.node_count() {
+            assert_eq!(
+                table[i],
+                abi.address(i),
+                "ordinal {i} resolves to its own row"
+            );
+        }
+        // Anti-vacuity: a table of zeros, or one whose rows are all equal,
+        // would satisfy a naive length-and-agreement check.
+        assert!(
+            table.iter().any(|&(c, id)| c != 0 || id != 0),
+            "the fixture must carry a non-zero address or this proves nothing"
+        );
+        assert!(
+            table
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                > 1,
+            "the addresses must differ between ordinals"
+        );
     }
 }
