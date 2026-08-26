@@ -47,6 +47,7 @@
 
 pub mod abi;
 pub mod layout;
+pub mod radial;
 pub mod scene;
 
 #[cfg(feature = "wgpu")]
