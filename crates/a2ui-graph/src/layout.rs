@@ -244,9 +244,23 @@ impl Layout {
         // neighbour. So on a placed field the term is not merely redundant,
         // it is destructive — it was tuned against a seed roughly ten times
         // sparser, and at the address's real spacing (~2.5 units) it reaches
-        // 900/2.5² ≈ 144 per pair, which no restoring stiffness soft enough
-        // to permit a wobble can balance. Measured, leaving it on dissolves
-        // the address inside one drag.
+        // 900/2.5² ≈ 144 per pair.
+        //
+        // Measured on the live corpus, median distance from the address:
+        //
+        // | anchor | repulsion | @240 | @2400 | converged |
+        // |---|---|---|---|---|
+        // | none            | on  | 627  | 891   | no  |
+        // | [`GRAVITY`]     | on  | 279  | 296   | no  |
+        // | [`ANCHOR`]      | on  | 129  | 130   | yes |
+        // | [`ANCHOR`]      | off | 30.7 | 30.7  | yes |
+        //
+        // So skipping is not what makes the field converge — the stiffness
+        // alone already does that, and an earlier draft of this comment
+        // claimed otherwise on the strength of a run that had not finished.
+        // What skipping buys is TIGHTNESS: 1.3 % of the span instead of
+        // 5.4 %, a four-fold difference in how far the picture drifts from
+        // the address it is supposed to be showing.
         //
         // What survives is springs + anchor: edges tug, the address pulls
         // back, and that IS the wobble — around a shape that stays.
