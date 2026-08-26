@@ -80,6 +80,39 @@
 //! entropy threshold does is why [`FOLD_BITS`] is a threshold rather than
 //! a fitted constant.
 //!
+//! # Romanesco — why the default is recursive phyllotaxis
+//!
+//! The sunburst above is a good *sunburst*. Measured against the rule that
+//! actually reads the hierarchy as self-similar, it loses on every axis.
+//! All four scaled to the same span (2500) so the numbers are comparable:
+//!
+//! | rule | `is_a` median | p90 | nn p10 | nn p50 | stacked |
+//! |---|---|---|---|---|---|
+//! | sunburst | 518 | 958 | 0.08 | 0.16 | 198 |
+//! | **romanesco** | **338** | **817** | **0.85** | **2.48** | **0** |
+//!
+//! `nn` is nearest-neighbour separation, and it is the column that decides
+//! whether a field is legible at all. The sunburst's median of 0.16 means
+//! **half of all nodes have a neighbour within a sixth of a pixel** — the
+//! rings are simply too short a curve to hold their occupants, so siblings
+//! smear along an arc. Romanesco's 2.48 is a 19× improvement, and it stacks
+//! **nothing**, because filling a disc gives a subtree area to grow into
+//! where an arc gives it only length.
+//!
+//! The trade is real and is not hidden: **depth stops being readable as
+//! distance from the centre.** Under Romanesco depth is encoded by SCALE —
+//! measured, the median radius by tree depth is 693, 69, 726, 769… , not
+//! monotone at all. You read depth by zooming, which is what a pan-and-zoom
+//! field is for, but it is a different affordance and
+//! [`RadialStyle::Sunburst`] is kept for when rings are what is wanted.
+//!
+//! **The rule was already half-present in this crate.** `Layout::seeded`
+//! seeds the force simulation by golden-angle phyllotaxis — the right rule,
+//! applied once, flat, over *lane order*, which carries no structure at
+//! all. Romanesco is that same rule made recursive over the *address*. The
+//! constant is shared from `layout.rs` rather than redefined, so the two
+//! cannot drift.
+//!
 //! # What was tried and REJECTED, so it is not re-attempted
 //!
 //! **Occupancy-driven ring radii** — giving each ring the circumference its
@@ -90,6 +123,26 @@
 //! relative and self-normalising; radial occupancy weighting is absolute
 //! and unbounded. They are not the same idea applied to two axes.
 //!
+//! **Tribonacci ring spacing** — radii stepping by 1, 2, 4, 7, 13, 24, …,
+//! the tribonacci analogue of a golden ladder — fails for the same reason,
+//! and the arithmetic says why before any measurement does: the ratio
+//! converges on 1.8393, and over eleven levels that compounds to ≈1400×.
+//! Normalised to a sane span it crushes the inner rings (radius 4 to 49 for
+//! the first five) and the densest cell goes 528 → **3223**; un-normalised
+//! the span reaches **111 578**. A geometric ladder cannot span a
+//! hierarchy whose depth it does not know about.
+//!
+//! **The bouquet** — each subtree a local fan around its parent, rather
+//! than a global ring — is the closest of the rejected shapes, and it
+//! taught the lesson Romanesco then used. It *does* shorten edges (median
+//! 434 → 381), but it buys them by concentrating: the same nodes occupy 645
+//! of the 40 px cells the sunburst spreads over 1655, i.e. 39 % of the
+//! area. Scaling each stem by its subtree's size to relieve that (the
+//! standard balloon-layout fix) overcorrects the other way — span 18 598,
+//! median 1340. What was missing is that a fan is one-dimensional: children
+//! placed along an arc get length, not area. Romanesco keeps the local,
+//! recursive idea and gives each subtree a DISC.
+//!
 //! A sub-linear ring exponent (`r = 110·d^0.85`) DID beat uniform spacing
 //! on this corpus at equal density (span 1477, median 337, p90 605). It is
 //! exposed as [`RadialParams::ring_gamma`] and left at `1.0`: one corpus is
@@ -98,6 +151,7 @@
 //! a rule of not shipping. The knob is live; the default is honest.
 
 use crate::abi::GraphAbi;
+use crate::layout::GOLDEN_ANGLE;
 
 /// Levels carried per axis, per register.
 const LEVELS_PER_REGISTER: usize = 6;
@@ -174,16 +228,57 @@ pub fn decode_rail(entry: &[u8]) -> Option<RailPath> {
     Some(p)
 }
 
+/// Which placement rule lays the address out.
+///
+/// Both read the same address; they differ in what the *picture* encodes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RadialStyle {
+    /// **Romanesco** — recursive phyllotaxis. Each node's children fill its
+    /// disc at the golden angle, with a radius proportional to the square
+    /// root of the subtree's size, and the same rule applies inside every
+    /// child. Self-similar at every scale, like the vegetable.
+    ///
+    /// This is the default because at equal span it beats [`Self::Sunburst`]
+    /// on every measure taken (see the module docs), most decisively on the
+    /// one that decides whether a field is readable at all: **nearest-
+    /// neighbour separation, 19× better at the median**.
+    ///
+    /// The trade, stated because it is real: depth stops being readable as
+    /// distance-from-centre. Under this rule depth is encoded by SCALE, so
+    /// you read it by zooming rather than by counting rings — which is what
+    /// a pan-and-zoom field is for, but it IS a different affordance.
+    #[default]
+    Romanesco,
+    /// **Sunburst** — concentric rings, one per unfolded level, each level's
+    /// arc split by occupancy. Depth is readable as distance from the
+    /// centre, which [`Self::Romanesco`] gives up. Kept for that reason and
+    /// because it is the literal reading of the producer's contract.
+    Sunburst,
+}
+
 /// Placement knobs. The defaults are what the corpus measured; every one
 /// of them is a number this module can point at a table for.
 #[derive(Clone, Copy, Debug)]
 pub struct RadialParams {
-    /// Radius step between consecutive rings.
+    /// Which placement rule to use.
+    pub style: RadialStyle,
+    /// Radius step between consecutive rings. [`RadialStyle::Sunburst`] only.
     pub ring: f32,
     /// Ring radius exponent: `r = ring · depth^gamma`. `1.0` is uniform.
     /// See the module docs for why the measured-better `0.85` is not the
-    /// default.
+    /// default. [`RadialStyle::Sunburst`] only.
     pub ring_gamma: f32,
+    /// Radius of the outermost disc. [`RadialStyle::Romanesco`] only.
+    pub disc: f32,
+    /// How much of a parent disc its children may fill, as a linear factor.
+    ///
+    /// Below `1.0` because circles cannot tile a circle: the children's
+    /// areas sum to the parent's exactly at `1.0`, so some slack is what
+    /// keeps sibling discs from overlapping. Measured on the live corpus,
+    /// this is the legibility knob — `0.88` gives shorter edges, `0.95`
+    /// gives more separation, and `0.92` is where both are still better
+    /// than the sunburst on every axis.
+    pub pack: f32,
     /// Fraction of one ring step the secondary axis may displace a node
     /// radially. The overlay must never reach the neighbouring ring, or
     /// depth stops being readable off the picture.
@@ -193,8 +288,11 @@ pub struct RadialParams {
 impl Default for RadialParams {
     fn default() -> Self {
         Self {
+            style: RadialStyle::Romanesco,
             ring: 95.0,
             ring_gamma: 1.0,
+            disc: 1200.0,
+            pack: 0.92,
             overlay: 0.35,
         }
     }
@@ -236,16 +334,26 @@ impl RadialLayout {
         let mut ys = vec![0.0; n];
         let mut rings = vec![0u16; n];
 
+        if p.style == RadialStyle::Romanesco {
+            // The children of the root, and their children, and so on down —
+            // the same rule at every scale.
+            let nodes: Vec<usize> = order_of(paths);
+            let root = Group::split(&nodes, paths, 0);
+            bloom(
+                &root, paths, 0.0, 0.0, p.disc, 0.0, p, &mut xs, &mut ys, &mut rings,
+            );
+            return Self {
+                xs,
+                ys,
+                rings,
+                folded,
+            };
+        }
+
         // One occupancy-weighted sunburst sweep. Sorting by the FULL path
         // — folded levels included — is what keeps a folded subtree
         // contiguous in arc while costing it no radius.
-        let mut order: Vec<usize> = (0..n).collect();
-        order.sort_by(|&a, &b| {
-            paths[a]
-                .taxonomy_path()
-                .cmp(paths[b].taxonomy_path())
-                .then(a.cmp(&b))
-        });
+        let order: Vec<usize> = order_of(paths);
         // Scoped so the mutable borrows of `xs`/`ys` end before the struct
         // is built, without a no-op `drop` of a non-Drop closure.
         {
@@ -438,6 +546,123 @@ fn place_inner(
     }
 }
 
+/// Node ordinals sorted by their full address, ties broken by ordinal.
+///
+/// Sorting by the FULL path — folded levels included — is what keeps a
+/// folded subtree contiguous while costing it no radius, and it is what
+/// lets both placement rules find their groups by a linear scan.
+fn order_of(paths: &[RailPath]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..paths.len()).collect();
+    order.sort_by(|&a, &b| {
+        paths[a]
+            .taxonomy_path()
+            .cmp(paths[b].taxonomy_path())
+            .then(a.cmp(&b))
+    });
+    order
+}
+
+/// One subtree: the ordinals that terminate here, and the child subtrees.
+struct Group<'a> {
+    here: &'a [usize],
+    kids: Vec<Group<'a>>,
+    /// Total ordinals in this subtree, `here` included — the AREA weight.
+    size: usize,
+}
+
+impl<'a> Group<'a> {
+    /// Carve a pre-sorted slice into "ends at this level" + one group per
+    /// distinct value of this level. Linear, because the slice is sorted.
+    fn split(order: &'a [usize], paths: &[RailPath], level: usize) -> Self {
+        let mut end_here = 0;
+        while end_here < order.len() && paths[order[end_here]].taxonomy_depth() <= level {
+            end_here += 1;
+        }
+        let (here, rest) = order.split_at(end_here);
+        let mut kids = Vec::new();
+        let mut cursor = 0;
+        while cursor < rest.len() {
+            let v = paths[rest[cursor]].taxonomy[level];
+            let mut end = cursor;
+            while end < rest.len() && paths[rest[end]].taxonomy[level] == v {
+                end += 1;
+            }
+            kids.push(Self::split(&rest[cursor..end], paths, level + 1));
+            cursor = end;
+        }
+        let size = here.len() + kids.iter().map(|k| k.size).sum::<usize>();
+        Self { here, kids, size }
+    }
+}
+
+/// The Romanesco sweep: fill this disc with this subtree, then recurse.
+///
+/// # The two rules, and why each is the one it is
+///
+/// **Radius grows as √(cumulative share).** A disc's area is `πr²`, so a
+/// radius proportional to the square root of a share makes the AREA
+/// proportional to the share — which is the only scaling that neither
+/// crowds a big subtree nor strands a small one. It is also why a
+/// geometric ladder fails here: a tribonacci step compounds its ratio
+/// (1.839¹¹ ≈ 1400×) and a linear stem does not shrink at all, so both
+/// were measured and rejected (module docs).
+///
+/// **Angle advances by the golden angle.** Consecutive items land at
+/// 137.508°, the classic phyllotaxis packing: because the golden ratio is
+/// the irrational hardest to approximate by a rational, no two items ever
+/// fall on the same spoke, at any count. Any rational fraction of a turn
+/// produces spokes and therefore gaps.
+///
+/// Together they are Vogel's sunflower rule, generalised to weighted items
+/// and applied recursively — the same rule at every scale, which is what
+/// makes it self-similar.
+///
+/// The phase is inherited from the parent's own angle rather than reset to
+/// zero. That is what stops every subtree starting its spiral at due east,
+/// which reads as a visible seam through the whole field.
+#[expect(clippy::too_many_arguments, reason = "a recursive sweep's own frame")]
+fn bloom(
+    g: &Group<'_>,
+    paths: &[RailPath],
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    phase: f32,
+    p: RadialParams,
+    xs: &mut [f32],
+    ys: &mut [f32],
+    rings: &mut [u16],
+) {
+    let total = g.size.max(1) as f32;
+    let span = radius * p.pack;
+    let mut cumulative = 0.0f32;
+    let mut slot = 0.0f32;
+
+    let step = |share: f32, cumulative: &mut f32, slot: &mut f32| {
+        // The item's own midpoint in the cumulative area, so a large child
+        // sits at the centre of the band it occupies rather than at its edge.
+        let r = span * ((*cumulative + share * 0.5) / total).sqrt();
+        let a = phase + *slot * GOLDEN_ANGLE;
+        *cumulative += share;
+        *slot += 1.0;
+        (cx + r * a.cos(), cy + r * a.sin(), a)
+    };
+
+    for &i in g.here {
+        let (x, y, _) = step(1.0, &mut cumulative, &mut slot);
+        xs[i] = x;
+        ys[i] = y;
+        rings[i] = u16::try_from(paths[i].taxonomy_depth()).unwrap_or(u16::MAX);
+    }
+    for kid in &g.kids {
+        let share = kid.size as f32;
+        let (x, y, a) = step(share, &mut cumulative, &mut slot);
+        // Area-proportional child disc: its area is its share of this one.
+        let r = span * (share / total).sqrt();
+        bloom(kid, paths, x, y, r, a, p, xs, ys, rings);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +682,19 @@ mod tests {
             out[reg + 2 * k + 1] = mer.get(level).copied().unwrap_or(0);
         }
         out
+    }
+
+    /// Sunburst params. The tests below predate [`RadialStyle::Romanesco`]
+    /// becoming the default and test the SUNBURST rule specifically — rings,
+    /// arcs, the radial overlay. Pinning the style is the honest fix: the
+    /// alternative, re-pointing them at whatever the default happens to be,
+    /// would quietly turn them into tests of a rule they were never written
+    /// for.
+    fn sun() -> RadialParams {
+        RadialParams {
+            style: RadialStyle::Sunburst,
+            ..Default::default()
+        }
     }
 
     fn path(tax: &[u8]) -> RailPath {
@@ -537,7 +775,7 @@ mod tests {
         for v in 2..=8u8 {
             paths.push(path(&[v]));
         }
-        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        let l = RadialLayout::from_paths(&paths, sun());
         assert_eq!(
             l.folded_levels(),
             0,
@@ -582,7 +820,7 @@ mod tests {
         }
         paths.push(path(&[2, 1]));
 
-        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        let l = RadialLayout::from_paths(&paths, sun());
         assert_eq!(l.folded_levels(), 1, "level 0 must fold, level 1 must not");
 
         // A folded level costs no ring: every node here is at taxonomy
@@ -604,7 +842,7 @@ mod tests {
     fn an_informative_first_level_is_not_folded() {
         // Eight roots, one node each: 3 bits, comfortably over FOLD_BITS.
         let paths: Vec<RailPath> = (1..=8u8).map(|v| path(&[v, 1])).collect();
-        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        let l = RadialLayout::from_paths(&paths, sun());
         assert_eq!(l.folded_levels(), 0, "3 bits must survive the fold rule");
         assert!((0..8).all(|i| l.ring(i) == 2), "two levels, two rings");
     }
@@ -623,7 +861,7 @@ mod tests {
         // land on ring 0 — distinct addresses, therefore distinct places.
         let mut paths = vec![path(&[1]); 9];
         paths.push(path(&[2]));
-        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        let l = RadialLayout::from_paths(&paths, sun());
         assert_eq!(
             l.folded_levels(),
             1,
@@ -658,7 +896,7 @@ mod tests {
     /// never reach the next one, or depth stops being readable.
     #[test]
     fn the_overlay_never_crosses_into_the_neighbouring_ring() {
-        let p = RadialParams::default();
+        let p = sun();
         let saturated = decode_rail(&entry(&[3, 1], &[255; 12])).expect("decodes");
         let bare = path(&[3, 1]);
         let l = RadialLayout::from_paths(&[bare, saturated], p);
@@ -670,6 +908,155 @@ mod tests {
             r(1) - r(0),
             p.ring
         );
+    }
+
+    #[test]
+    fn romanesco_is_the_default_style() {
+        assert_eq!(RadialParams::default().style, RadialStyle::Romanesco);
+    }
+
+    /// Area proportionality: a subtree with 4x the nodes gets a disc 2x the
+    /// radius, because area is what must scale, not radius.
+    ///
+    /// Measured through the leaves rather than through an internal radius:
+    /// the spread of a subtree's own nodes IS its disc.
+    #[test]
+    fn a_child_disc_scales_with_the_square_root_of_its_share() {
+        // Root 1 carries 64 nodes, root 2 carries 16 — a 4:1 share, so the
+        // discs should differ 2:1, not 4:1.
+        let mut paths = Vec::new();
+        for i in 0..64u8 {
+            paths.push(path(&[1, i / 8 + 1, i % 8 + 1]));
+        }
+        for i in 0..16u8 {
+            paths.push(path(&[2, i / 4 + 1, i % 4 + 1]));
+        }
+        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        let spread = |from: usize, to: usize| {
+            let (mut cx, mut cy) = (0.0f32, 0.0f32);
+            for i in from..to {
+                cx += l.xs()[i];
+                cy += l.ys()[i];
+            }
+            let n = (to - from) as f32;
+            let (cx, cy) = (cx / n, cy / n);
+            (
+                (from..to)
+                    .map(|i| (l.xs()[i] - cx).hypot(l.ys()[i] - cy))
+                    .fold(0.0, f32::max),
+                n,
+            )
+        };
+        let (big, _) = spread(0, 64);
+        let (small, _) = spread(64, 80);
+        let ratio = big / small;
+        assert!(
+            (ratio - 2.0).abs() < 0.45,
+            "4:1 share should give a ~2:1 disc (sqrt), measured {ratio:.2}; a \
+             linear share would give ~4.0 and an equal one ~1.0"
+        );
+    }
+
+    /// The golden angle is load-bearing, not decorative.
+    ///
+    /// Any RATIONAL fraction of a turn puts items back on the same spokes
+    /// after its denominator, leaving wedge-shaped gaps and stacked nodes.
+    /// The golden ratio is the irrational hardest to approximate by a
+    /// rational, so no two items ever share a spoke at any count.
+    #[test]
+    fn siblings_never_land_on_the_same_spoke() {
+        // 24 siblings under one parent: enough that a rational step of
+        // TAU/8 or TAU/12 would have wrapped onto itself twice.
+        let paths: Vec<RailPath> = (1..=24u8).map(|v| path(&[3, v])).collect();
+        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        // About the subtree's own centre — siblings spiral around their
+        // PARENT, so an angle taken from the origin is not their spoke.
+        let (mut cx, mut cy) = (0.0f32, 0.0f32);
+        for i in 0..paths.len() {
+            cx += l.xs()[i];
+            cy += l.ys()[i];
+        }
+        let n = paths.len() as f32;
+        let (cx, cy) = (cx / n, cy / n);
+        let mut angles: Vec<f32> = (0..paths.len())
+            .map(|i| {
+                (l.ys()[i] - cy)
+                    .atan2(l.xs()[i] - cx)
+                    .rem_euclid(std::f32::consts::TAU)
+            })
+            .collect();
+        angles.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let closest = angles
+            .windows(2)
+            .map(|w| w[1] - w[0])
+            .fold(f32::MAX, f32::min);
+        assert!(
+            closest > 0.05,
+            "closest sibling spoke gap {closest:.4} rad — a rational angle \
+             step collapses siblings onto shared spokes"
+        );
+        // …and no two share a coordinate at all.
+        for i in 0..paths.len() {
+            for j in i + 1..paths.len() {
+                assert!(
+                    (l.xs()[i] - l.xs()[j]).hypot(l.ys()[i] - l.ys()[j]) > 1e-3,
+                    "nodes {i} and {j} are stacked"
+                );
+            }
+        }
+    }
+
+    /// Each subtree inherits its parent's angle as its spiral phase. Reset
+    /// it to zero and every subtree starts due east, which reads as one
+    /// bright seam straight through the field.
+    #[test]
+    fn a_subtree_inherits_its_parents_phase_rather_than_starting_due_east() {
+        // Four sibling subtrees, each with several children. If the phase
+        // were reset, each subtree's FIRST child would sit at angle 0
+        // relative to its own centre — all four pointing the same way.
+        let mut paths = Vec::new();
+        for r in 1..=4u8 {
+            for c in 1..=6u8 {
+                paths.push(path(&[9, r, c]));
+            }
+        }
+        let l = RadialLayout::from_paths(&paths, RadialParams::default());
+        // Direction from each subtree's centroid to its first child.
+        let first_dirs: Vec<f32> = (0..4)
+            .map(|r| {
+                let (from, to) = (r * 6, r * 6 + 6);
+                let (mut cx, mut cy) = (0.0f32, 0.0f32);
+                for i in from..to {
+                    cx += l.xs()[i];
+                    cy += l.ys()[i];
+                }
+                let (cx, cy) = (cx / 6.0, cy / 6.0);
+                (l.ys()[from] - cy).atan2(l.xs()[from] - cx)
+            })
+            .collect();
+        let spread = first_dirs
+            .iter()
+            .flat_map(|a| first_dirs.iter().map(move |b| (a - b).abs()))
+            .fold(0.0f32, f32::max);
+        assert!(
+            spread > 0.3,
+            "the four subtrees all open in the same direction (spread \
+             {spread:.3} rad) — the phase was reset instead of inherited"
+        );
+    }
+
+    /// The sunburst is still reachable and still means what it meant.
+    #[test]
+    fn the_sunburst_style_still_places_depth_as_distance() {
+        // Eight roots so level 0 clears FOLD_BITS — otherwise everything
+        // folds onto ring 0 and there is no depth left to measure.
+        let mut paths = vec![path(&[1]), path(&[1, 1]), path(&[1, 1, 1])];
+        for v in 2..=8u8 {
+            paths.push(path(&[v]));
+        }
+        let l = RadialLayout::from_paths(&paths, sun());
+        let r = |i: usize| l.xs()[i].hypot(l.ys()[i]);
+        assert!(r(0) < r(1) && r(1) < r(2), "depth must grow outward");
     }
 
     #[test]

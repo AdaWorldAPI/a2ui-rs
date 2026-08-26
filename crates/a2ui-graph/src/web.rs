@@ -25,6 +25,7 @@
 
 use wasm_bindgen::prelude::*;
 
+use crate::radial::RadialLayout;
 use crate::{Camera, FieldRenderer, GraphAbi, Layout, Scene};
 
 /// A pointer gesture, already resolved to what it MEANS rather than to which
@@ -161,6 +162,15 @@ pub struct FieldClient {
 /// How many simulation steps a disturbance buys. Enough to re-settle after a
 /// drag; small enough that an idle field stops computing entirely.
 const WARM_FRAMES: u32 = 240;
+
+/// Settle steps spent on a stream that carries NO address.
+///
+/// Only the fallback path pays this. An addressed field skips it entirely —
+/// not as an optimisation but because the steps are actively harmful there:
+/// measured on the live corpus, letting a placed field step freely moves the
+/// median node 627 units inside one drag's worth of frames, and what it
+/// decays toward is the force layout's own equilibrium.
+const UNADDRESSED_SETTLE: u32 = 160;
 /// Click radius in PIXELS — converted to world units per camera, so the
 /// target stays the same physical size at every zoom.
 const PICK_RADIUS_PX: f32 = 18.0;
@@ -336,10 +346,20 @@ impl FieldClient {
         };
         surface.configure(&device, &config);
 
-        // Settle before the first frame, so the field appears laid out rather
-        // than exploding outward while the user watches.
+        // Prefer the ADDRESS. A stream carrying the rail lane already says
+        // where every node belongs, so placing it is a read, not a search:
+        // 38 751 nodes in ~22 ms against 160 settle steps that never reach a
+        // fixed point. `place` also anchors, so the simulation that follows
+        // perturbs the address instead of dissolving it.
+        //
+        // The force layout remains the fallback, and it is a real one: a
+        // stream without rails has nothing to place FROM, and stacking an
+        // unaddressed graph at the origin would be worse than solving for it.
         let mut layout = Layout::from_abi(&abi);
-        layout.settle(160);
+        match RadialLayout::from_abi(&abi) {
+            Some(addressed) => layout.place(addressed.xs(), addressed.ys()),
+            None => layout.settle(UNADDRESSED_SETTLE as usize),
+        }
         let scene = Scene::build(&abi, &layout);
         let renderer = FieldRenderer::new(&device, format, &scene);
         let camera = layout.bounds().map_or_else(

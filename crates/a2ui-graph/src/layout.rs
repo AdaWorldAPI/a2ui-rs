@@ -26,7 +26,13 @@
 //! by starting the graph already spread rather than collapsed at the origin.
 
 /// Golden angle in radians — the seeding spiral's turn per node.
-const GOLDEN_ANGLE: f32 = 2.399_963_2;
+/// The golden angle, 137.508° in radians.
+///
+/// Shared with [`crate::radial`] rather than defined twice: that module's
+/// Romanesco rule is THIS rule made recursive over the node's address,
+/// where `seeded` applies it once, flat, over lane order. One definition,
+/// so the two cannot drift apart.
+pub(crate) const GOLDEN_ANGLE: f32 = 2.399_963_2;
 /// Grid cell edge, in layout units, for the repulsion neighbourhood.
 const CELL: f32 = 60.0;
 /// Repulsion strength between two nodes in neighbouring cells.
@@ -37,6 +43,20 @@ const SPRING: f32 = 0.012;
 const REST: f32 = 55.0;
 /// Pull toward the origin, so a disconnected component cannot drift away.
 const GRAVITY: f32 = 0.004;
+/// Restoring stiffness toward a node's HOME, once one has been placed.
+///
+/// Ten times [`GRAVITY`], and not by taste: gravity's job is to gather an
+/// unplaced cloud toward one point, where this one has to HOLD a node on an
+/// address against repulsion (900) and springs. At gravity's own stiffness
+/// the median node still wanders 279 units inside one drag's 240 frames —
+/// better than the 627 of no anchor at all, but still a field that dissolves
+/// while the viewer watches.
+///
+/// It is not stiffer than that on purpose. The neighbours of a grabbed node
+/// must visibly move — the wobble IS the simulation, per this crate's own
+/// charter — so the anchor has to be soft enough to yield and firm enough to
+/// bring the field back. Measured either side, below.
+const ANCHOR: f32 = 0.04;
 /// Velocity retained per step.
 const DAMPING: f32 = 0.86;
 /// Largest displacement one node may take in one step, in layout units.
@@ -54,8 +74,29 @@ pub struct Layout {
     vy: Vec<f32>,
     /// Per-node mass, derived from degree: a hub resists being pushed.
     mass: Vec<f32>,
+    /// Stiffness of the pull toward [`Self::hx`]/[`Self::hy`]. [`GRAVITY`]
+    /// while every home is the origin, [`ANCHOR`] once an address was
+    /// placed — one scalar, so the hot loop keeps a single multiply and no
+    /// per-node branch.
+    pull: f32,
     /// `(from, to)` ordinals — already ghost-filtered by the ABI view.
     edges: Vec<[u32; 2]>,
+    /// Where gravity pulls each node — its HOME.
+    ///
+    /// Zero for every node unless [`Layout::place`] set an address, which
+    /// makes the unaddressed case bit-identical to the single origin this
+    /// field replaced: `pos - 0` is the same subtraction the old form did.
+    ///
+    /// This is the whole anchoring mechanism, and it is deliberately not a
+    /// new force. Gravity already existed and already pulled every node
+    /// toward one point; an addressed field simply gives each node its OWN
+    /// point. Measured, the alternative — letting a placed field step
+    /// freely — moves the median node 627 units within a single drag's 240
+    /// warm frames, against a disc radius of 1200: the address is gone
+    /// after one interaction, and what it decays into is the force
+    /// layout's own equilibrium, which is the thing being replaced.
+    hx: Vec<f32>,
+    hy: Vec<f32>,
     /// Nodes the user is holding. A pinned node ignores all forces, which is
     /// what makes "grab and the neighbours wobble" a consequence of the
     /// simulation rather than a special case in the renderer.
@@ -83,7 +124,10 @@ impl Layout {
             vx: vec![0.0; n],
             vy: vec![0.0; n],
             mass,
+            pull: GRAVITY,
             edges,
+            hx: vec![0.0; n],
+            hy: vec![0.0; n],
             pinned: vec![false; n],
         }
     }
@@ -103,6 +147,37 @@ impl Layout {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.xs.is_empty()
+    }
+
+    /// Adopt a set of positions as the layout's current state, at rest.
+    ///
+    /// The seeding hook for [`crate::radial`]: a field whose nodes carry an
+    /// address does not need a solver to find its shape, but it still needs
+    /// this type for the drag, the pin, and the wobble. So the address
+    /// PLACES and the simulation only ever REACTS.
+    ///
+    /// Velocities are zeroed, not preserved. A node that arrives somewhere
+    /// by decree has no history, and carrying a stale velocity into a
+    /// decreed position is how a settled field starts drifting for no
+    /// reason the viewer can see.
+    ///
+    /// Lengths shorter than the layout leave the remaining nodes untouched;
+    /// longer ones are ignored past the end. Silently placing a partial set
+    /// beats panicking on a stream whose lanes disagree.
+    pub fn place(&mut self, xs: &[f32], ys: &[f32]) {
+        let n = self.len().min(xs.len()).min(ys.len());
+        self.xs[..n].copy_from_slice(&xs[..n]);
+        self.ys[..n].copy_from_slice(&ys[..n]);
+        // The placed position is also HOME: gravity's target for that node.
+        // Without this the field is placed and then immediately pulled off
+        // its address by the very next frame.
+        self.hx[..n].copy_from_slice(&xs[..n]);
+        self.hy[..n].copy_from_slice(&ys[..n]);
+        for i in 0..n {
+            self.vx[i] = 0.0;
+            self.vy[i] = 0.0;
+        }
+        self.pull = ANCHOR;
     }
 
     /// Hold a node at a position — the drag. While pinned it ignores every
@@ -160,45 +235,61 @@ impl Layout {
         let mut fx = vec![0.0f32; n];
         let mut fy = vec![0.0f32; n];
 
-        // 1. Repulsion, local only.
-        let grid = self.bin();
-        for (&(cx, cy), bucket) in &grid {
-            for dy in -1..=1 {
-                for dx in -1..=1 {
-                    let Some(other) = grid.get(&(cx + dx, cy + dy)) else {
-                        continue;
-                    };
-                    for &a in bucket {
-                        let (ax, ay) = (self.xs[a as usize], self.ys[a as usize]);
-                        for &b in other {
-                            if a == b {
-                                continue;
+        // 1. Repulsion, local only — and SKIPPED on an addressed field.
+        //
+        // Repulsion exists to stop nodes occupying the same place. An
+        // address already guarantees that: recursive phyllotaxis packs a
+        // disc at uniform density and stacks nothing, where this layout's
+        // own seed leaves half its nodes within a sixth of a pixel of a
+        // neighbour. So on a placed field the term is not merely redundant,
+        // it is destructive — it was tuned against a seed roughly ten times
+        // sparser, and at the address's real spacing (~2.5 units) it reaches
+        // 900/2.5² ≈ 144 per pair, which no restoring stiffness soft enough
+        // to permit a wobble can balance. Measured, leaving it on dissolves
+        // the address inside one drag.
+        //
+        // What survives is springs + anchor: edges tug, the address pulls
+        // back, and that IS the wobble — around a shape that stays.
+        if self.pull == GRAVITY {
+            let grid = self.bin();
+            for (&(cx, cy), bucket) in &grid {
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let Some(other) = grid.get(&(cx + dx, cy + dy)) else {
+                            continue;
+                        };
+                        for &a in bucket {
+                            let (ax, ay) = (self.xs[a as usize], self.ys[a as usize]);
+                            for &b in other {
+                                if a == b {
+                                    continue;
+                                }
+                                let (mut ddx, mut ddy) =
+                                    (ax - self.xs[b as usize], ay - self.ys[b as usize]);
+                                // Two nodes at the SAME point have no direction to
+                                // be pushed along, so the naive form computes a
+                                // large force and multiplies it by a zero vector:
+                                // they stay welded together forever. (The earlier
+                                // note here only guarded the division; the test
+                                // `coincident_nodes_separate…` caught that the
+                                // direction is the actual failure.) Substitute a
+                                // deterministic unit vector derived from the two
+                                // ORDINALS — same pair, same escape direction, in
+                                // every process; a PRNG here would trade the bug
+                                // for an unreproducible layout.
+                                if ddx * ddx + ddy * ddy < 1e-6 {
+                                    let a = (a ^ (b << 1)) as f32 * GOLDEN_ANGLE;
+                                    ddx = a.cos() * 0.01;
+                                    ddy = a.sin() * 0.01;
+                                }
+                                // The floor keeps the force finite once a real
+                                // direction exists.
+                                let d2 = (ddx * ddx + ddy * ddy).max(0.75);
+                                let f = REPULSION / d2;
+                                let inv = f / d2.sqrt();
+                                fx[a as usize] += ddx * inv;
+                                fy[a as usize] += ddy * inv;
                             }
-                            let (mut ddx, mut ddy) =
-                                (ax - self.xs[b as usize], ay - self.ys[b as usize]);
-                            // Two nodes at the SAME point have no direction to
-                            // be pushed along, so the naive form computes a
-                            // large force and multiplies it by a zero vector:
-                            // they stay welded together forever. (The earlier
-                            // note here only guarded the division; the test
-                            // `coincident_nodes_separate…` caught that the
-                            // direction is the actual failure.) Substitute a
-                            // deterministic unit vector derived from the two
-                            // ORDINALS — same pair, same escape direction, in
-                            // every process; a PRNG here would trade the bug
-                            // for an unreproducible layout.
-                            if ddx * ddx + ddy * ddy < 1e-6 {
-                                let a = (a ^ (b << 1)) as f32 * GOLDEN_ANGLE;
-                                ddx = a.cos() * 0.01;
-                                ddy = a.sin() * 0.01;
-                            }
-                            // The floor keeps the force finite once a real
-                            // direction exists.
-                            let d2 = (ddx * ddx + ddy * ddy).max(0.75);
-                            let f = REPULSION / d2;
-                            let inv = f / d2.sqrt();
-                            fx[a as usize] += ddx * inv;
-                            fy[a as usize] += ddy * inv;
                         }
                     }
                 }
@@ -280,7 +371,7 @@ impl Layout {
 
         let n = self.len();
         let (gravity, damping, max_step) = (
-            F32x16::splat(GRAVITY),
+            F32x16::splat(self.pull),
             F32x16::splat(DAMPING),
             F32x16::splat(MAX_STEP),
         );
@@ -292,8 +383,10 @@ impl Layout {
             let m = F32x16::from_slice(&self.mass[i..]);
             // Gravity pulls toward the origin, scaled by mass — the same
             // `f -= pos * GRAVITY * mass` as the scalar form, in lanes.
-            let fxl = F32x16::from_slice(&fx[i..]) - x * gravity * m;
-            let fyl = F32x16::from_slice(&fy[i..]) - y * gravity * m;
+            let hx = F32x16::from_slice(&self.hx[i..]);
+            let hy = F32x16::from_slice(&self.hy[i..]);
+            let fxl = F32x16::from_slice(&fx[i..]) - (x - hx) * gravity * m;
+            let fyl = F32x16::from_slice(&fy[i..]) - (y - hy) * gravity * m;
 
             let vx = (F32x16::from_slice(&self.vx[i..]) + fxl / m) * damping;
             let vy = (F32x16::from_slice(&self.vy[i..]) + fyl / m) * damping;
@@ -357,8 +450,8 @@ impl Layout {
             return;
         }
         let (fx, fy) = (
-            fx - self.xs[i] * GRAVITY * self.mass[i],
-            fy - self.ys[i] * GRAVITY * self.mass[i],
+            fx - (self.xs[i] - self.hx[i]) * self.pull * self.mass[i],
+            fy - (self.ys[i] - self.hy[i]) * self.pull * self.mass[i],
         );
         self.vx[i] = (self.vx[i] + fx / self.mass[i]) * DAMPING;
         self.vy[i] = (self.vy[i] + fy / self.mass[i]) * DAMPING;
@@ -429,6 +522,84 @@ impl Layout {
 
 #[cfg(test)]
 mod tests {
+
+    /// A placed field reaches a FIXED POINT and stays there.
+    ///
+    /// This is what "two fetches render identically" needs: the address is
+    /// the equilibrium, and the simulation settles into it instead of
+    /// wandering away from it. Measured on the live 38 751-node corpus the
+    /// median node ends 30.7 units from its address and is at exactly 30.7
+    /// after 240, 960 and 2400 frames — converged, not merely slow.
+    #[test]
+    fn a_placed_field_settles_and_then_stops_moving() {
+        let n = 400;
+        let edges: Vec<[u32; 2]> = (0..n as u32 - 1).map(|i| [i, i + 1]).collect();
+        let deg = vec![2u32; n];
+        let mut l = Layout::seeded(n, edges, &deg);
+        // An address: a coarse grid, tighter than the force model's own seed.
+        let xs: Vec<f32> = (0..n).map(|i| (i % 20) as f32 * 6.0).collect();
+        let ys: Vec<f32> = (0..n).map(|i| (i / 20) as f32 * 6.0).collect();
+        l.place(&xs, &ys);
+
+        l.settle(300);
+        let a: Vec<f32> = l.xs.iter().chain(l.ys.iter()).copied().collect();
+        l.settle(300);
+        let b: Vec<f32> = l.xs.iter().chain(l.ys.iter()).copied().collect();
+        let moved = a
+            .iter()
+            .zip(&b)
+            .map(|(p, q)| (p - q).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            moved < 0.5,
+            "300 further frames moved a node {moved:.3} — a placed field \
+             that never converges dissolves its own address"
+        );
+        // …and it settled NEAR the address, not somewhere else entirely.
+        let far = (0..n)
+            .map(|i| (l.xs[i] - xs[i]).hypot(l.ys[i] - ys[i]))
+            .fold(0.0f32, f32::max);
+        assert!(far < 60.0, "settled {far:.1} from the address");
+    }
+
+    /// The unaddressed path is untouched: repulsion still separates nodes
+    /// that would otherwise sit on top of each other.
+    ///
+    /// The paired half of the test above — an addressed field skips
+    /// repulsion, so this proves the skip is conditional rather than a
+    /// deletion.
+    #[test]
+    fn an_unaddressed_field_still_repels_coincident_nodes() {
+        let mut l = Layout::seeded(2, vec![], &[0, 0]);
+        l.xs[0] = 0.0;
+        l.ys[0] = 0.0;
+        l.xs[1] = 0.1;
+        l.ys[1] = 0.0;
+        let before = (l.xs[1] - l.xs[0]).hypot(l.ys[1] - l.ys[0]);
+        l.settle(30);
+        let after = (l.xs[1] - l.xs[0]).hypot(l.ys[1] - l.ys[0]);
+        assert!(
+            after > before * 5.0,
+            "two coincident unaddressed nodes must push apart: {before:.3} \
+             -> {after:.3}"
+        );
+    }
+
+    /// `place` anchors: gravity's target becomes the address, not the
+    /// origin. Displace a placed node and it comes back to its address.
+    #[test]
+    fn a_displaced_node_returns_to_its_address_not_to_the_origin() {
+        let mut l = Layout::seeded(1, vec![], &[0]);
+        l.place(&[500.0], &[0.0]);
+        l.xs[0] = 560.0;
+        l.settle(400);
+        assert!(
+            (l.xs[0] - 500.0).abs() < 6.0,
+            "returned to {:.1}, expected ~500 (the address); ~0 would mean \
+             gravity is still aimed at the origin",
+            l.xs[0]
+        );
+    }
     use super::*;
 
     /// A ring of `n` nodes plus its closing edge — a shape with a known
