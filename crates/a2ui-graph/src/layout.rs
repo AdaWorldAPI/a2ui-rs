@@ -308,7 +308,18 @@ impl Layout {
                 max_step / d.simd_max(F32x16::splat(1e-6)),
                 F32x16::splat(1.0),
             );
-            let (dx, dy) = (vx * scale, vy * scale);
+            // The clamp applies to the VELOCITY, not merely to this frame's
+            // displacement. Scaling only the step and storing the unscaled
+            // `vx`/`vy` lets speed accumulate without bound behind a capped
+            // move: every node then travels a full `MAX_STEP` every frame in
+            // whatever direction its stale velocity points, damping never
+            // catches up, and the layout orbits instead of settling. Measured
+            // on the 38,751-node MedCare field, mean speed reached ~176
+            // against a cap of 24 and `energy()` plateaued forever instead of
+            // decaying — the "boiling soup". Clamping here makes `energy()`
+            // the honest convergence read its own doc comment claims to be.
+            let (vx, vy) = (vx * scale, vy * scale);
+            let (dx, dy) = (vx, vy);
 
             // The pin veto: keep the previous velocity and position wherever
             // the node is pinned. The mask is built from `pinned` on the spot
@@ -351,15 +362,17 @@ impl Layout {
         );
         self.vx[i] = (self.vx[i] + fx / self.mass[i]) * DAMPING;
         self.vy[i] = (self.vy[i] + fy / self.mass[i]) * DAMPING;
-        let (mut dx, mut dy) = (self.vx[i], self.vy[i]);
-        let d = (dx * dx + dy * dy).sqrt();
+        // The clamp lands on the velocity itself — see the lane path in
+        // `integrate` for why storing the unclamped speed is what made the
+        // layout orbit rather than settle.
+        let d = (self.vx[i] * self.vx[i] + self.vy[i] * self.vy[i]).sqrt();
         if d > MAX_STEP {
             let s = MAX_STEP / d;
-            dx *= s;
-            dy *= s;
+            self.vx[i] *= s;
+            self.vy[i] *= s;
         }
-        self.xs[i] += dx;
-        self.ys[i] += dy;
+        self.xs[i] += self.vx[i];
+        self.ys[i] += self.vy[i];
     }
 
     /// Run `k` steps — the settle a first frame does before it is shown.
