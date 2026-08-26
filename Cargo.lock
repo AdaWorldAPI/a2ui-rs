@@ -10,6 +10,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "a2ui-field-web"
+version = "0.1.0"
+dependencies = [
+ "a2ui-graph",
+ "axum",
+ "tokio",
+]
+
+[[package]]
 name = "a2ui-graph"
 version = "0.1.0"
 dependencies = [
@@ -1307,7 +1316,6 @@ dependencies = [
 [[package]]
 name = "ndarray"
 version = "0.17.2"
-source = "git+https://github.com/AdaWorldAPI/ndarray?branch=master#e0a7e1cec6b7579d5433ea64b8dac39ad1b59c58"
 dependencies = [
  "matrixmultiply",
  "num-complex",
