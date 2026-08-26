@@ -143,6 +143,14 @@ pub struct FieldClient {
     /// the consumer: `navigator.gpu` being present is not the same fact as the
     /// field being routed through WebGPU.
     backend: FieldBackend,
+    /// Every node's `(classid, identity)`, in lane order.
+    ///
+    /// A materialization, and a deliberate one: `mount` BORROWS the ABI bytes
+    /// and they are gone by the time anyone clicks, so a pick cannot lens the
+    /// node lane it came from. The alternative — retaining the whole stream —
+    /// costs 4.98 MB on the shipped MedCare wave against 310 KB for the
+    /// addresses alone (38 751 nodes x 8 B), for data no pick path reads.
+    addresses: Box<[(u32, u32)]>,
     /// The node currently held, if any — the drag.
     dragging: Option<u32>,
     /// Frames of simulation still owed. A settled field costs nothing per
@@ -245,9 +253,7 @@ impl FieldClient {
         });
         let surface = instance
             .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
-            .map_err(|e| {
-                JsValue::from_str(&format!("canvas surface ({}): {e}", backend.name()))
-            })?;
+            .map_err(|e| JsValue::from_str(&format!("canvas surface ({}): {e}", backend.name())))?;
 
         // `compatible_surface` is what makes wgpu offer a backend for THIS
         // canvas at all; without it the wasm32 WebGL backend is not offered
@@ -344,6 +350,10 @@ impl FieldClient {
             |b| Camera::fit(b, [w as f32, h as f32], 1.25),
         );
 
+        // Resolved HERE because this is the last place the ABI exists: the
+        // bytes are borrowed and gone once mount returns.
+        let addresses = abi.addresses();
+
         Ok(FieldClient {
             device,
             queue,
@@ -354,6 +364,7 @@ impl FieldClient {
             layout,
             camera,
             backend,
+            addresses,
             dragging: None,
             warm: WARM_FRAMES,
         })
@@ -391,7 +402,7 @@ impl FieldClient {
                 self.warm = WARM_FRAMES;
                 Some(Picked {
                     ordinal: ord,
-                    address: (0, 0),
+                    address: self.addresses.get(hit).copied().unwrap_or((0, 0)),
                 })
             }
             Gesture::Move(sx, sy) => {
