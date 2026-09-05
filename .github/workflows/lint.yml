@@ -12,14 +12,48 @@ concurrency:
 permissions:
   contents: read
 
+# `.cargo/config.toml` in this repository carries
+#
+#     [patch."https://github.com/AdaWorldAPI/ndarray"]
+#     ndarray = { path = "../ndarray" }
+#
+# so every cargo invocation here — including `cargo fmt`, which resolves the
+# workspace through `cargo metadata` — redirects the `ndarray` git coordinate
+# to a SIBLING checkout and fails without one. That file describes itself as a
+# local development override that the shipped build never sees, and it is right
+# about the Railway image, whose Dockerfile copies only the manifests and
+# `crates/`. It is wrong about CI: the file is committed, so a runner checks it
+# out and cargo honours it.
+#
+# Rather than delete a deliberate operator ruling ("prefer the local/fork source
+# over the registry, always") to suit CI, the jobs below give CI the sibling the
+# override expects. `actions/checkout` cannot write outside `$GITHUB_WORKSPACE`,
+# so this repository is checked out into a NAMED subdirectory and `ndarray`
+# beside it — the same shape `AdaWorldAPI/lance-graph`'s own `style.yml` uses.
 jobs:
   format:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: a2ui-rs
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: a2ui-rs
+      - name: Checkout AdaWorldAPI/ndarray (sibling the .cargo patch points at)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
+          # `defaults.run.working-directory` applies to `run:` steps only, never
+          # to action steps — this one executes from $GITHUB_WORKSPACE, where the
+          # checkout is a subdirectory and no toolchain file is visible, and would
+          # silently install `stable` instead of the pin. `rust-src-dir` is the
+          # input that points it at the checkout.
+          rust-src-dir: a2ui-rs
           # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
           # pinned version lives in exactly ONE place.
           components: rustfmt, clippy
@@ -28,25 +62,47 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: a2ui-rs
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: a2ui-rs
+      - name: Checkout AdaWorldAPI/ndarray (sibling the .cargo patch points at)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
-          # pinned version lives in exactly ONE place.
+          rust-src-dir: a2ui-rs
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: a2ui-rs
       - run: cargo clippy --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: a2ui-rs
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: a2ui-rs
+      - name: Checkout AdaWorldAPI/ndarray (sibling the .cargo patch points at)
+        uses: actions/checkout@v4
+        with:
+          repository: AdaWorldAPI/ndarray
+          path: ndarray
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # No `toolchain:` input — the action reads `rust-toolchain.toml`, so the
-          # pinned version lives in exactly ONE place.
+          rust-src-dir: a2ui-rs
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: a2ui-rs
       - run: cargo test --workspace
