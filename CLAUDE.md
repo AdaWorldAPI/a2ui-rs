@@ -162,10 +162,15 @@ scales out before P-REHOST is green.
 ## Build
 
 ```sh
-cargo +1.97.1 test            # workspace = edition 2024 / rust 1.97.1 (matches OGAR)
-cargo +1.97.1 clippy --all-targets -- -D warnings
-cargo +1.97.1 fmt --check
+cargo test                    # workspace = edition 2024 / rust 1.98.1 (matches OGAR)
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
 ```
+
+The pin lives in `rust-toolchain.toml` — a bare `cargo` in this checkout
+resolves to it, so these invocations deliberately carry no `+<version>`
+prefix: that prefix would be a second source of truth for the toolchain
+version, exactly what `rust-toolchain.toml` exists to make unnecessary.
 
 ## Git — token-safe push (hard-won lesson, do not relearn)
 

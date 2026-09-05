@@ -55,7 +55,7 @@ checks the four preconditions that otherwise fail silently or confusingly:
 
 ```bash
 RUSTFLAGS='-C target-feature=+simd128' \
-  cargo +1.97.1 build -p a2ui-graph \
+  cargo +1.98.1 build -p a2ui-graph \
               --target wasm32-unknown-unknown --release
 
 wasm-bindgen --target web --out-dir pkg \
@@ -91,7 +91,7 @@ regenerated from the crate, never a source of truth.
 | `wasm-bindgen` CLI version == `Cargo.lock` pin | glue for a different ABI; surfaces at runtime, in a browser |
 | `wasm32-unknown-unknown` installed **for that toolchain** | `can't find crate for core` — reads like a broken install, is a one-line fix |
 | `FieldHandle` symbol present in the module | the client was linked out; see §"The two silent failures" |
-| toolchain pin (`1.97.1`, override with `RUST_TOOLCHAIN`) | a bare `cargo` names two different rust-version floors and no fix |
+| toolchain pin (`1.98.1`, override with `RUST_TOOLCHAIN`) | a bare `cargo` names two different rust-version floors and no fix |
 
 Targets are **per-toolchain**, which is why the second one exists: switching
 toolchains loses the target, and the resulting error names neither.

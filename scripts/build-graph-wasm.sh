@@ -28,12 +28,12 @@ cd "$(dirname "$0")/.."
 OUT="${1:-crates/a2ui-graph/pkg}"
 WASM=target/wasm32-unknown-unknown/release/a2ui_graph.wasm
 
-# The workspace toolchain. 1.97.1 by ALIGNMENT — Dockerfile.railway documents
+# The workspace toolchain. 1.98.1 by ALIGNMENT — Dockerfile.railway documents
 # it as this workspace's toolchain, and the ndarray fork's own manifest now
-# requires 1.97, so a bare `cargo` (whatever the default happens to be) fails
+# requires 1.98, so a bare `cargo` (whatever the default happens to be) fails
 # with a rust-version error that names two different floors and no fix.
-# Override for a one-off: `RUST_TOOLCHAIN=1.98 ./scripts/build-graph-wasm.sh`.
-TOOLCHAIN="${RUST_TOOLCHAIN:-1.97.1}"
+# Override for a one-off: `RUST_TOOLCHAIN=1.99 ./scripts/build-graph-wasm.sh`.
+TOOLCHAIN="${RUST_TOOLCHAIN:-1.98.1}"
 
 # ── 1. The CLI must match the crate ────────────────────────────────────────
 # wasm-bindgen's generated glue is tied to the exact version of the crate

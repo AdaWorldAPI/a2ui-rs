@@ -665,7 +665,9 @@ mod tests {
             .expect("device poll");
         let data = slice.get_mapped_range().expect("readback mapped");
         let painted = data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .filter(|p| p[0] | p[1] | p[2] != 0)
             .count();
 
