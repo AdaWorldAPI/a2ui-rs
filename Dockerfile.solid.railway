@@ -30,13 +30,13 @@
 # polygons. Vector out, no raster, no canvas, no `wgpu`. Railway containers
 # have no GPU and this tier does not want one.
 #
-# TOOLCHAIN — 1.97.1 by ALIGNMENT, not necessity, exactly as in the paint
+# TOOLCHAIN — 1.98.1 by ALIGNMENT, not necessity, exactly as in the paint
 # image. The crates declare `rust-version = "1.95"` and build green there; the
 # pin matches the toolchain CLAUDE.md documents so one version holds across the
-# workspace. Do not cite this line as evidence that something requires 1.97.1.
+# workspace. Do not cite this line as evidence that something requires 1.98.1.
 # ---------------------------------------------------------------------------
 
-ARG RUST_VERSION=1.97.1
+ARG RUST_VERSION=1.98.1
 ARG BIN_NAME=a2ui-solid-web
 
 # ── builder ────────────────────────────────────────────────────────────────

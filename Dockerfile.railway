@@ -21,10 +21,10 @@
 #      because as a workspace member any path dep breaks every cargo invocation
 #      in their CI. No lance, no DataFusion, no arrow arrives here.
 #
-#   2. "raises the toolchain floor [to 1.97.1]" — ALSO FALSE, and the more
+#   2. "raises the toolchain floor [to 1.98.1]" — ALSO FALSE, and the more
 #      interesting error. Measured: `cargo +1.95.0 build -p a2ui-paint-web`
 #      compiles `lance-graph-contract` from scratch and passes all 8 tests.
-#      The 1.97.1 came from lance-graph's `rust-toolchain.toml`, which is THAT
+#      The 1.98.1 came from lance-graph's `rust-toolchain.toml`, which is THAT
 #      REPO'S OWN build pin — cargo does not read a dependency's toolchain file,
 #      so it never propagates to a consumer. An MSRV that binds you is
 #      `rust-version` in the dependency's manifest, and that crate declares
@@ -44,18 +44,18 @@
 # renderer needs; wgpu only adds the surface draw, which belongs in the
 # browser, not in this container. Do NOT add `--features wgpu`.
 #
-# TOOLCHAIN — 1.97.1 by ALIGNMENT, not by necessity. CLAUDE.md documents
-# `cargo +1.97.1` as this workspace's toolchain, so the image uses it and one
+# TOOLCHAIN — 1.98.1 by ALIGNMENT, not by necessity. CLAUDE.md documents
+# `cargo +1.98.1` as this workspace's toolchain, so the image uses it and one
 # version holds everywhere. What this pin is NOT is a floor: the crate declares
 # `rust-version = "1.95"` and genuinely builds and tests green on 1.95.0 with
 # every dependency present (measured, see the CORRECTION above). A newer
 # toolchain always works, so alignment is free — but do not cite this line as
-# evidence that something requires 1.97.1. If the floor ever really does rise,
+# evidence that something requires 1.98.1. If the floor ever really does rise,
 # it will show up as a `rust-version` bump in a manifest, and THAT is the thing
 # to move in lockstep with this pin.
 # ---------------------------------------------------------------------------
 
-ARG RUST_VERSION=1.97.1
+ARG RUST_VERSION=1.98.1
 ARG BIN_NAME=a2ui-paint-web
 
 # ── builder ────────────────────────────────────────────────────────────────

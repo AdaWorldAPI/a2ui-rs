@@ -1,0 +1,50 @@
+[toolchain]
+channel = "1.98.1"
+# The pinned version is the `channel` line ABOVE — deliberately not restated
+# in this comment, so a future bump touches one line rather than editing
+# prose that then drifts. (lance-graph's rust-toolchain.toml explains the
+# same reasoning; every sibling repo in this stack — lance-graph, OGAR,
+# tesseract-rs, stockfish-rs, ruff — follows this shape.)
+#
+# This file did not exist before this pin. Before it, a2ui-rs carried the
+# toolchain only as PROSE — CLAUDE.md's `cargo +1.97.1 test/clippy/fmt`,
+# docs/WASM-INTEGRATION.md, scripts/build-graph-wasm.sh's `RUST_TOOLCHAIN`
+# default, and the two Dockerfiles' `ARG RUST_VERSION` — with no
+# `.github/workflows/` at all in this repo to enforce any of it. That is
+# exactly the drift shape this file exists to close: a bare `cargo` in this
+# checkout now resolves to the reviewed toolchain without a human copying a
+# version string across five files by hand.
+#
+# `rust-version = "1.95"` in Cargo.toml remains the crate's own declared
+# MSRV floor and is untouched by this file — this channel is an alignment
+# choice with the sibling repos, same as the Dockerfiles already document
+# ("by ALIGNMENT, not by necessity"). Note the ndarray fork's OWN manifest
+# now declares `rust-version = "1.98"` (verified in the sibling checkout),
+# so 1.95 no longer reliably builds this workspace's `ndarray` git
+# dependency regardless of this file's channel — a separate, pre-existing
+# gap this bump does not attempt to close (see CLAUDE.md / this session's
+# report for detail).
+#
+# Bump log (append one line per bump):
+#   (no file) → 1.98.1   added the file + bumped from the prose-only 1.97.1
+#                     pin in one step, joining the workspace-wide 1.98 sweep
+#                     already landed in lance-graph / OGAR / stockfish-rs /
+#                     ruff. Delta measured in THIS repo via
+#                     `cargo clippy --all-targets -- -D warnings`: 2 findings,
+#                     both `clippy::chunks_exact_to_as_chunks` (new in 1.98,
+#                     default-on STYLE group) — `crates/a2ui-graph/src/
+#                     radial.rs` and `crates/a2ui-graph/src/gpu.rs`, both
+#                     test-only `chunks_exact(N)` calls, fixed to
+#                     `.as_chunks::<N>().0`. No `#![allow(...)]`/
+#                     `#![expect(...)]` list carried the removed
+#                     `clippy::from_iter_instead_of_collect`. `cargo test`
+#                     and `cargo fmt --check` were both clean before and
+#                     after the fix.
+#
+# Never auto-track `stable` — bump explicitly when a future version is
+# reviewed and the workspace's fmt/clippy/test gates pass clean.
+#
+# rustfmt + clippy ride the pin so a fresh `rustup show` in this workspace
+# materializes the complete CI-equivalent toolchain in one step (same
+# rationale lance-graph's file states in full).
+components = ["rustfmt", "clippy"]
