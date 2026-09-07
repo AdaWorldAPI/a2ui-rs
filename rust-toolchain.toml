@@ -41,6 +41,20 @@ channel = "1.98.1"
 #                     and `cargo fmt --check` were both clean before and
 #                     after the fix.
 #
+#   1.98.1 (image fix, no channel change)   The two Dockerfiles used this same
+#                     version string as their base-image TAG
+#                     (`rust:1.98.1-slim-bookworm`), and that image does not
+#                     exist: docker-library does not tag every point release.
+#                     Measured — that tag is a 404 while `1.98` / `1.98.0` are
+#                     200, and `channel-rust-1.98.1.toml` is a 200, so the
+#                     CHANNEL above was always valid and only the IMAGE was
+#                     absent. Both files now float their base on the MINOR tag
+#                     and COPY this file into the builder, so rustup
+#                     materialises the channel there instead of the tag
+#                     deciding it. That also closes a gap this file could not
+#                     previously reach: it was never copied into either image,
+#                     so the pin had no effect on a Railway build at all.
+#
 # Never auto-track `stable` — bump explicitly when a future version is
 # reviewed and the workspace's fmt/clippy/test gates pass clean.
 #
