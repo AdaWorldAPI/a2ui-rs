@@ -47,7 +47,7 @@
 # TOOLCHAIN — 1.98.1 by ALIGNMENT, not by necessity. CLAUDE.md documents
 # `cargo +1.98.1` as this workspace's toolchain, so the image uses it and one
 # version holds everywhere. What this pin is NOT is a floor: the crate declares
-# `rust-version = "1.95"` and genuinely builds and tests green on 1.95.0 with
+# `rust-version = "1.98.1"` and genuinely builds and tests green on 1.98.1 with
 # every dependency present (measured, see the CORRECTION above). A newer
 # toolchain always works, so alignment is free — but do not cite this line as
 # evidence that something requires 1.98.1. If the floor ever really does rise,
@@ -71,6 +71,13 @@
 # release and lags the ones it does. A toolchain pin can therefore be valid
 # while its same-numbered image tag is absent, and a Dockerfile that conflates
 # them inherits an availability constraint it never meant to take on.
+#
+# (2026-09-25: the 1.98.1 tags now exist — `rust:1.98.1`, `rust:1.98.1-bookworm`
+# and `rust:1.98.1-slim-bookworm` are all HTTP 200 as of today. The 404 above
+# was real when this file was written; docker-library has since published the
+# point-release tags it was lagging. The MINOR-tag float below is still kept
+# on purpose — see the "Consequence worth stating" paragraph — but the ARG is
+# now set to the exact patch tag since it exists.)
 #
 # (The failure surfaces confusingly: BuildKit resolves every stage's base in
 # parallel, so the last line printed is often the HEALTHY one —
@@ -96,7 +103,7 @@
 # (1.98 -> 1.99), and never to a patch-level tag — that is the shape that
 # broke.
 
-ARG RUST_IMAGE_TAG=1.98-slim-bookworm
+ARG RUST_IMAGE_TAG=1.98.1-slim-bookworm
 ARG BIN_NAME=a2ui-paint-web
 
 # ── builder ────────────────────────────────────────────────────────────────
