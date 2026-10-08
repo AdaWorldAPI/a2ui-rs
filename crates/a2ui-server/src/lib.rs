@@ -52,6 +52,7 @@ pub mod desktop;
 pub mod lowering;
 #[cfg(feature = "json")]
 pub mod membrane;
+pub mod plugged;
 pub mod project;
 pub mod render_stream;
 pub mod session;
