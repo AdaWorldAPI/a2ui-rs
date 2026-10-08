@@ -1146,7 +1146,7 @@ checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
 [[package]]
 name = "lance-graph-contract"
 version = "0.1.0"
-source = "git+https://github.com/AdaWorldAPI/lance-graph?branch=main#6cb61be2a0c577c232c639ff0f6102a2c5b21dcd"
+source = "git+https://github.com/AdaWorldAPI/lance-graph?branch=main#d8fb61fc91fa903f6d2499185fe339d5162ad67c"
 dependencies = [
  "glob",
  "serde",
