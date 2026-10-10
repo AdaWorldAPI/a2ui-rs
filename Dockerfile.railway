@@ -103,7 +103,7 @@
 # (1.98 -> 1.99), and never to a patch-level tag — that is the shape that
 # broke.
 
-ARG RUST_IMAGE_TAG=1.98.1-slim-bookworm
+ARG RUST_IMAGE_TAG=1.99.0-slim-bookworm
 ARG BIN_NAME=a2ui-paint-web
 
 # ── builder ────────────────────────────────────────────────────────────────
