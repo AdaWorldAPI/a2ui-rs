@@ -43,21 +43,8 @@
 //! reordered frame fails closed, it is never applied twice.
 
 use a2ui_core::{Frame, FrameError};
-use ogar_encryption::aead::{self, NONCE_LEN, TAG_LEN};
-
-/// A sealed frame's fixed prefix: `direction(1) + counter(8)`.
-const SEAL_PREFIX: usize = 1 + 8;
-
-/// Which half-duplex stream a sealed frame belongs to — the nonce
-/// `direction` byte, so the two directions never share a `(key, nonce)`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Direction {
-    /// Server → client (the addressed-surface `NodeDelta` stream).
-    ServerToClient = 0,
-    /// Client → server (the `ActionInvoke` stream).
-    ClientToServer = 1,
-}
+pub use ogar_encryption::stream::Direction;
+use ogar_encryption::stream::{SealedStream, StreamError};
 
 /// Why a sealed frame could not be produced or accepted.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +53,15 @@ pub enum TransportError {
     Truncated,
     /// The `direction` byte was not a known [`Direction`].
     BadDirection(u8),
+    /// The `direction` byte names the other half of the session: a frame
+    /// offered to the transport that does not receive it, for example a
+    /// sender's own frame reflected back at it. Refused, never applied.
+    WrongDirection {
+        /// The direction this transport receives.
+        expected: Direction,
+        /// The direction the frame carries.
+        got: Direction,
+    },
     /// AEAD open failed — wrong key, or the blob was tampered with
     /// (indistinguishable by design).
     Decrypt,
@@ -78,8 +74,23 @@ pub enum TransportError {
         /// The highest counter already accepted on that direction.
         last: u64,
     },
+    /// The send counter is exhausted; the session must be re-keyed.
+    CounterExhausted,
     /// The decrypted plaintext was not a valid frame.
     Frame(FrameError),
+}
+
+impl From<StreamError> for TransportError {
+    fn from(e: StreamError) -> Self {
+        match e {
+            StreamError::Truncated => Self::Truncated,
+            StreamError::BadDirection(b) => Self::BadDirection(b),
+            StreamError::WrongDirection { expected, got } => Self::WrongDirection { expected, got },
+            StreamError::Replay { got, last } => Self::Replay { got, last },
+            StreamError::Decrypt => Self::Decrypt,
+            StreamError::CounterExhausted => Self::CounterExhausted,
+        }
+    }
 }
 
 impl core::fmt::Display for TransportError {
@@ -87,10 +98,14 @@ impl core::fmt::Display for TransportError {
         match self {
             Self::Truncated => f.write_str("sealed frame shorter than its prefix"),
             Self::BadDirection(b) => write!(f, "unknown transport direction {b}"),
+            Self::WrongDirection { expected, got } => {
+                write!(f, "frame for {got:?} offered to the {expected:?} receiver")
+            }
             Self::Decrypt => f.write_str("sealed frame failed to open (wrong key or tampered)"),
             Self::Replay { got, last } => {
                 write!(f, "replayed/reordered frame: counter {got} <= last {last}")
             }
+            Self::CounterExhausted => f.write_str("send counter exhausted; re-key the session"),
             Self::Frame(e) => write!(f, "decrypted plaintext is not a valid frame: {e}"),
         }
     }
@@ -98,17 +113,22 @@ impl core::fmt::Display for TransportError {
 
 impl std::error::Error for TransportError {}
 
+fn other(d: Direction) -> Direction {
+    match d {
+        Direction::ServerToClient => Direction::ClientToServer,
+        Direction::ClientToServer => Direction::ServerToClient,
+    }
+}
+
 /// A sealed session transport over one direction of the stream.
 ///
-/// Holds the 32-byte session key (derived once, see
-/// [`crate::session::Session`]), the stream `direction` this half owns, its
-/// own send counter, and the highest counter it has accepted on receive (for
-/// replay rejection). Construct one per direction per endpoint.
+/// A thin frame layer over [`ogar_encryption::stream::SealedStream`]: it seals
+/// frames onto `direction` and opens only frames that carry `direction`.
+/// Construct one per direction per endpoint, all with the session key (derived
+/// once, see [`crate::session::Session`]).
 pub struct SealedTransport {
-    key: [u8; 32],
-    direction: Direction,
-    send_counter: u64,
-    last_recv_counter: Option<u64>,
+    sender: SealedStream,
+    receiver: SealedStream,
 }
 
 impl SealedTransport {
@@ -116,49 +136,28 @@ impl SealedTransport {
     #[must_use]
     pub fn new(key: [u8; 32], direction: Direction) -> Self {
         Self {
-            key,
-            direction,
-            send_counter: 0,
-            last_recv_counter: None,
+            sender: SealedStream::new(key, direction),
+            // The receiving half of `direction` is the stream that sends the
+            // other way: it accepts only frames whose direction byte is
+            // `direction`.
+            receiver: SealedStream::new(key, other(direction)),
         }
     }
 
-    /// Build the 24-byte XChaCha nonce for `(direction, counter)`:
-    /// `[direction:1][counter:8 LE][zero:15]`.
-    fn nonce(direction: Direction, counter: u64) -> [u8; NONCE_LEN] {
-        let mut n = [0u8; NONCE_LEN];
-        n[0] = direction as u8;
-        n[1..9].copy_from_slice(&counter.to_le_bytes());
-        n
-    }
-
-    /// Seal one [`Frame`] for transmission. Advances this half's send counter;
-    /// the returned bytes are `[direction][counter][ciphertext‖tag]`.
+    /// Seal one [`Frame`] for transmission. Advances this transport's send
+    /// counter; the returned bytes are `[direction][counter][ciphertext‖tag]`.
     ///
     /// The frame's own `to_le_bytes` is the plaintext — nothing serializes to
     /// wrap it (charter T3). `FRAME_VERSION` is bound as AEAD associated data,
     /// so a version mismatch on the wire fails the open.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Never in practice: `aead::seal_with_key` only fails on an internal
-    /// AEAD error, which cannot occur for a valid 32-byte key and 24-byte
-    /// nonce; the `expect` documents that invariant.
-    #[must_use]
-    pub fn seal_frame(&mut self, frame: &Frame) -> Vec<u8> {
-        let counter = self.send_counter;
-        self.send_counter += 1;
-        let nonce = Self::nonce(self.direction, counter);
-        let plaintext = frame.to_le_bytes();
+    /// [`TransportError::CounterExhausted`] after 2^64 frames, or
+    /// [`TransportError::Decrypt`] if the AEAD reports an internal failure.
+    pub fn seal_frame(&mut self, frame: &Frame) -> Result<Vec<u8>, TransportError> {
         let aad = [a2ui_core::FRAME_VERSION];
-        let ciphertext = aead::seal_with_key(&self.key, &nonce, &aad, &plaintext)
-            .expect("XChaCha20-Poly1305 seal cannot fail for a valid key+nonce");
-
-        let mut out = Vec::with_capacity(SEAL_PREFIX + ciphertext.len());
-        out.push(self.direction as u8);
-        out.extend_from_slice(&counter.to_le_bytes());
-        out.extend_from_slice(&ciphertext);
-        out
+        Ok(self.sender.seal(&aad, &frame.to_le_bytes())?)
     }
 
     /// Open one sealed frame, enforcing strictly-monotonic counters (replay /
@@ -166,40 +165,13 @@ impl SealedTransport {
     ///
     /// # Errors
     ///
-    /// See [`TransportError`] — every arm is a refusal (truncation, bad
-    /// direction, AEAD failure, replay, or an invalid inner frame). On success
-    /// the accepted counter becomes the new watermark.
+    /// See [`TransportError`] — every arm is a refusal (truncation, wrong or
+    /// unknown direction, AEAD failure, replay, or an invalid inner frame). On
+    /// success the accepted counter becomes the new watermark.
     pub fn open_frame(&mut self, sealed: &[u8]) -> Result<Frame, TransportError> {
-        if sealed.len() < SEAL_PREFIX + TAG_LEN {
-            return Err(TransportError::Truncated);
-        }
-        let dir_byte = sealed[0];
-        let direction = match dir_byte {
-            0 => Direction::ServerToClient,
-            1 => Direction::ClientToServer,
-            other => return Err(TransportError::BadDirection(other)),
-        };
-        let mut ctr = [0u8; 8];
-        ctr.copy_from_slice(&sealed[1..9]);
-        let counter = u64::from_le_bytes(ctr);
-
-        // Replay / reorder rejection — BEFORE spending the AEAD open, so a
-        // flood of stale counters is cheap to shed. (The AEAD tag still
-        // authenticates the counter via the nonce, so a forged counter can't
-        // pass open anyway; this is defense-in-depth + ordering.)
-        if let Some(last) = self.last_recv_counter
-            && counter <= last
-        {
-            return Err(TransportError::Replay { got: counter, last });
-        }
-
-        let nonce = Self::nonce(direction, counter);
         let aad = [a2ui_core::FRAME_VERSION];
-        let plaintext = aead::open_with_key(&self.key, &nonce, &aad, &sealed[SEAL_PREFIX..])
-            .map_err(|_| TransportError::Decrypt)?;
-        let frame = Frame::from_le_bytes(&plaintext).map_err(TransportError::Frame)?;
-        self.last_recv_counter = Some(counter);
-        Ok(frame)
+        let plaintext = self.receiver.open(&aad, sealed)?;
+        Frame::from_le_bytes(&plaintext).map_err(TransportError::Frame)
     }
 }
 
@@ -225,7 +197,7 @@ mod tests {
         let mut tx = SealedTransport::new(key(), Direction::ServerToClient);
         let mut rx = SealedTransport::new(key(), Direction::ServerToClient);
         let f = node_frame();
-        let sealed = tx.seal_frame(&f);
+        let sealed = tx.seal_frame(&f).unwrap();
         // The plaintext frame is NOT visible in the sealed bytes.
         assert!(
             !sealed.windows(4).any(|w| w == [1, 2, 3, 4]),
@@ -239,7 +211,7 @@ mod tests {
     fn wrong_key_fails_to_open() {
         let mut tx = SealedTransport::new(key(), Direction::ServerToClient);
         let mut rx = SealedTransport::new([0xFFu8; 32], Direction::ServerToClient);
-        let sealed = tx.seal_frame(&node_frame());
+        let sealed = tx.seal_frame(&node_frame()).unwrap();
         assert_eq!(rx.open_frame(&sealed), Err(TransportError::Decrypt));
     }
 
@@ -247,7 +219,7 @@ mod tests {
     fn tamper_fails_to_open() {
         let mut tx = SealedTransport::new(key(), Direction::ServerToClient);
         let mut rx = SealedTransport::new(key(), Direction::ServerToClient);
-        let mut sealed = tx.seal_frame(&node_frame());
+        let mut sealed = tx.seal_frame(&node_frame()).unwrap();
         let n = sealed.len();
         sealed[n - 1] ^= 0x01; // flip a ciphertext/tag bit
         assert_eq!(rx.open_frame(&sealed), Err(TransportError::Decrypt));
@@ -262,7 +234,7 @@ mod tests {
             action_ordinal: 3,
             args: vec![],
         });
-        let sealed = tx.seal_frame(&f);
+        let sealed = tx.seal_frame(&f).unwrap();
         assert!(rx.open_frame(&sealed).is_ok());
         // Re-delivering the SAME sealed bytes must be refused (counter <= last).
         assert_eq!(
@@ -275,13 +247,29 @@ mod tests {
     fn reorder_is_rejected() {
         let mut tx = SealedTransport::new(key(), Direction::ServerToClient);
         let mut rx = SealedTransport::new(key(), Direction::ServerToClient);
-        let s0 = tx.seal_frame(&node_frame());
-        let s1 = tx.seal_frame(&node_frame());
+        let s0 = tx.seal_frame(&node_frame()).unwrap();
+        let s1 = tx.seal_frame(&node_frame()).unwrap();
         // Accept #1 first (counter 1); then #0 (counter 0) must be refused.
         assert!(rx.open_frame(&s1).is_ok());
         assert_eq!(
             rx.open_frame(&s0),
             Err(TransportError::Replay { got: 0, last: 1 })
+        );
+    }
+
+    /// A server's own frame reflected back at its receiving half is refused.
+    /// Both directions share the key, so only the direction check stops it.
+    #[test]
+    fn a_reflected_frame_is_refused() {
+        let mut down = SealedTransport::new(key(), Direction::ServerToClient);
+        let mut up = SealedTransport::new(key(), Direction::ClientToServer);
+        let own = down.seal_frame(&node_frame()).unwrap();
+        assert_eq!(
+            up.open_frame(&own),
+            Err(TransportError::WrongDirection {
+                expected: Direction::ClientToServer,
+                got: Direction::ServerToClient,
+            })
         );
     }
 
