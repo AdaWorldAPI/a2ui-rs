@@ -267,7 +267,10 @@ impl DesktopSession {
             fmt,
         )
         .map_err(DesktopError::Projection)?;
-        let sealed = self.down.seal_frame(&Frame::NodeDelta(projection.delta));
+        let sealed = self
+            .down
+            .seal_frame(&Frame::NodeDelta(projection.delta))
+            .map_err(DesktopError::Transport)?;
         Ok(RenderedFrame {
             sealed,
             html: projection.html,
@@ -455,11 +458,13 @@ mod tests {
         let key = key_0102();
         // The client seals an ActionInvoke (ordinal 1 = "Post") up the wire.
         let mut client_up = SealedTransport::new(srv.session_key(), Direction::ClientToServer);
-        let sealed = client_up.seal_frame(&CoreFrame::ActionInvoke(ActionInvoke {
-            key,
-            action_ordinal: 1,
-            args: vec![],
-        }));
+        let sealed = client_up
+            .seal_frame(&CoreFrame::ActionInvoke(ActionInvoke {
+                key,
+                action_ordinal: 1,
+                args: vec![],
+            }))
+            .unwrap();
 
         let resolved = srv.receive_action(&sealed).unwrap();
         assert_eq!(resolved.predicate, "action_post");
@@ -474,11 +479,13 @@ mod tests {
         assert_eq!(edges[0].seq, 0);
 
         // A second click advances the sequence; take_klickwege drains.
-        let sealed2 = client_up.seal_frame(&CoreFrame::ActionInvoke(ActionInvoke {
-            key,
-            action_ordinal: 0,
-            args: vec![],
-        }));
+        let sealed2 = client_up
+            .seal_frame(&CoreFrame::ActionInvoke(ActionInvoke {
+                key,
+                action_ordinal: 0,
+                args: vec![],
+            }))
+            .unwrap();
         srv.receive_action(&sealed2).unwrap();
         let drained = srv.take_klickwege();
         assert_eq!(drained.len(), 2);
@@ -504,11 +511,13 @@ mod tests {
     fn tampered_up_frame_is_refused_no_klickweg_recorded() {
         let mut srv = server();
         let mut client_up = SealedTransport::new(srv.session_key(), Direction::ClientToServer);
-        let mut sealed = client_up.seal_frame(&CoreFrame::ActionInvoke(ActionInvoke {
-            key: key_0102(),
-            action_ordinal: 0,
-            args: vec![],
-        }));
+        let mut sealed = client_up
+            .seal_frame(&CoreFrame::ActionInvoke(ActionInvoke {
+                key: key_0102(),
+                action_ordinal: 0,
+                args: vec![],
+            }))
+            .unwrap();
         let n = sealed.len();
         sealed[n - 1] ^= 0x01; // flip a tag bit
         assert!(matches!(

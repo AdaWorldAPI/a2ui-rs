@@ -259,7 +259,7 @@ fn p_rehost_lite_harvest_to_rehost_no_winforms() {
     let mut server_down = SealedTransport::new(server.key(), Direction::ServerToClient);
     let mut client_down = SealedTransport::new(client.key(), Direction::ServerToClient);
     let down_frame = Frame::NodeDelta(projection.delta.clone());
-    let sealed = server_down.seal_frame(&down_frame);
+    let sealed = server_down.seal_frame(&down_frame).unwrap();
     // The plaintext bytes are not visible in the sealed blob.
     assert!(
         !sealed.windows(16).any(|w| w == key),
@@ -285,7 +285,7 @@ fn p_rehost_lite_harvest_to_rehost_no_winforms() {
         action_ordinal: 1, // "Post" — an address, never a handler
         args: vec![],
     });
-    let sealed_up = client_up.seal_frame(&invoke);
+    let sealed_up = client_up.seal_frame(&invoke).unwrap();
     let received_up = server_up.open_frame(&sealed_up).unwrap();
     let Frame::ActionInvoke(ai) = received_up else {
         panic!("expected an ActionInvoke up the wire");
