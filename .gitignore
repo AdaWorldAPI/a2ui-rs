@@ -6,3 +6,6 @@ Cargo.lock.orig
 # wasm-bindgen output of scripts/build-graph-wasm.sh — a build artifact,
 # regenerated from the crate; never a source of truth.
 crates/a2ui-graph/pkg/
+
+# No tracked Cargo.lock (no pins, 2026-10-16): builds resolve the latest heads.
+Cargo.lock
