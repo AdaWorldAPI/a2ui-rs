@@ -28,12 +28,17 @@ cd "$(dirname "$0")/.."
 OUT="${1:-crates/a2ui-graph/pkg}"
 WASM=target/wasm32-unknown-unknown/release/a2ui_graph.wasm
 
-# The workspace toolchain. 1.98.1 by ALIGNMENT — Dockerfile.railway documents
-# it as this workspace's toolchain, and the ndarray fork's own manifest now
-# requires 1.98, so a bare `cargo` (whatever the default happens to be) fails
-# with a rust-version error that names two different floors and no fix.
+# The workspace toolchain is READ from rust-toolchain.toml, never restated
+# here. A hardcoded default (it was 1.98.1) survived the 1.99.0 channel bump
+# and broke every consumer image that installs the target for the pinned
+# channel only: step 1b below looked for wasm32 under 1.98.1 and exited 1.
 # Override for a one-off: `RUST_TOOLCHAIN=1.99 ./scripts/build-graph-wasm.sh`.
-TOOLCHAIN="${RUST_TOOLCHAIN:-1.98.1}"
+pinned=$(awk -F'"' '/^channel *=/{print $2; exit}' rust-toolchain.toml)
+if [ -z "$pinned" ]; then
+  echo "no channel in rust-toolchain.toml" >&2
+  exit 1
+fi
+TOOLCHAIN="${RUST_TOOLCHAIN:-$pinned}"
 
 # ── 1. The CLI must match the crate ────────────────────────────────────────
 # wasm-bindgen's generated glue is tied to the exact version of the crate
