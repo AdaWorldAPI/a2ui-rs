@@ -39,3 +39,7 @@ payload is replaced by the 16-byte facet key + mask + values.
 **P-REHOST** — re-render one harvested MedCare screen from its
 `CompiledClass` × ClassView × askama and fire one harvested `ActionDef`
 round-trip: harvest the app → re-render the app, no WinForms.
+
+## Consumer architecture proposals
+
+- [Morpheus PWA application desktop (three launch modes)](docs/MORPHEUS-PWA-APPLICATION-DESKTOP.md) — **proposal only**: browser-tab desktop, direct Microsoft 365 app launch and installable Morpheus PWA, including ZITADEL/local-mode boundaries and acceptance gates. No implementation implied.
