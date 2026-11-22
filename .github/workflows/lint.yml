@@ -82,6 +82,9 @@ jobs:
         with:
           workspaces: a2ui-rs
       - run: cargo clippy --all-targets -- -D warnings
+      # The optional PWA shell (Dockerfile.pwa.railway) is off in the default
+      # build, so it needs its own line or it is never compiled here.
+      - run: cargo clippy -p a2ui-paint-web --all-targets --features pwa -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -106,3 +109,4 @@ jobs:
         with:
           workspaces: a2ui-rs
       - run: cargo test --workspace
+      - run: cargo test -p a2ui-paint-web --features pwa

@@ -1,0 +1,72 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# a2ui-rs — Railway image for the PAINT tier as an INSTALLABLE APP (PWA).
+#
+# The third deployable, optional and separate:
+#
+#   Dockerfile.railway        -> a2ui-paint-web            (the paint tier)
+#   Dockerfile.solid.railway  -> a2ui-solid-web            (parametric solids)
+#   Dockerfile.pwa.railway    -> a2ui-paint-web --features pwa   (this file)
+#
+# It builds the SAME binary as `Dockerfile.railway` with the `pwa` cargo
+# feature on. The feature adds `/manifest.webmanifest`, `/sw.js` and
+# `/icons/*`, links the manifest from the index page and registers a service
+# worker that caches the shell only. Every route of the default image behaves
+# as before; the existing images and their Railway services are untouched.
+#
+# This is slice P2 of `docs/MORPHEUS-PWA-APPLICATION-DESKTOP.md` (#56), limited
+# to this demo's own origin. It does not install, wrap or control any other
+# site's app, and the worker never caches the live surface (`/hit`,
+# `/delta.bin`, `/html`).
+#
+# Installing needs HTTPS, which Railway's public domain provides. On a browser
+# without install support the site still works as a normal tab.
+#
+# Everything else matches `Dockerfile.railway`, and that file carries the
+# reasoning: the base image floats on the minor tag while `rust-toolchain.toml`
+# pins the toolchain; no `Cargo.lock` and no `--locked`, because the git
+# dependencies float on their branches; no `wgpu`, because the container has no
+# GPU; bind `0.0.0.0:$PORT`, with 8080 only as a local fallback.
+# ---------------------------------------------------------------------------
+
+ARG RUST_IMAGE_TAG=1.99.0-slim-bookworm
+ARG BIN_NAME=a2ui-paint-web
+
+# ── builder ────────────────────────────────────────────────────────────────
+FROM rust:${RUST_IMAGE_TAG} AS builder
+ARG BIN_NAME
+
+# git for the OGAR / lance-graph git dependencies. Both repos are PUBLIC — do
+# not add a token to this image.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git ca-certificates pkg-config \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+
+COPY rust-toolchain.toml ./
+RUN rustup show
+
+COPY Cargo.toml ./
+COPY crates ./crates
+
+RUN cargo build --release -p ${BIN_NAME} --features pwa \
+ && cp target/release/${BIN_NAME} /usr/local/bin/a2ui-paint-web
+
+# ── runtime ────────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --create-home --uid 10001 a2ui
+
+COPY --from=builder /usr/local/bin/a2ui-paint-web /usr/local/bin/a2ui-paint-web
+
+USER a2ui
+WORKDIR /app
+
+# Documentation only; the process binds $PORT.
+EXPOSE 8080
+
+CMD ["a2ui-paint-web"]
