@@ -51,6 +51,16 @@ use axum::{
 };
 use ogar_render_askama::{ActionRef, FieldView};
 
+#[cfg(feature = "pwa")]
+mod pwa;
+
+/// What the index page adds to its `<head>`: the PWA tags with `--features
+/// pwa`, nothing without it, so the default page is unchanged.
+#[cfg(feature = "pwa")]
+const PWA_HEAD: &str = pwa::HEAD;
+#[cfg(not(feature = "pwa"))]
+const PWA_HEAD: &str = "";
+
 /// The demo node every frame here addresses — a canonical 16-byte GUID.
 ///
 /// The classid is the u32 at bytes 0..4, **little-endian**, and under the
@@ -346,7 +356,7 @@ async fn index(RawQuery(raw): RawQuery) -> impl IntoResponse {
     // The click handler posts coordinates and shows the LE up-frame that comes
     // back. Note what it does NOT do: it never names an action, only a point.
     Html(format!(
-        r##"<!doctype html><meta charset="utf-8"><title>a2ui paint tier</title>
+        r##"<!doctype html><meta charset="utf-8"><title>a2ui paint tier</title>{pwa_head}
 <body style="margin:0;background:#0f1115;color:#cbd3e1;font:13px ui-sans-serif,system-ui,sans-serif">
 <div style="padding:10px 12px">
   <a href="/?skin=form" style="color:#7aa2f7">form</a> ·
@@ -378,6 +388,7 @@ document.getElementById('s').addEventListener('click', async e => {{
         w = vp.width,
         h = vp.height,
         sk = q.skin_param(),
+        pwa_head = PWA_HEAD,
     ))
 }
 
@@ -515,13 +526,18 @@ async fn health() -> impl IntoResponse {
              surface: {nf} fields, {na} actions (class declares {declared}; position {unsent} absent from the wire)\n\
              skins: form, flow, grid\n\
              renderers: svg (/) + askama (/html), one resolution\n\
-             wgpu: off (no GPU in container)\n",
+             wgpu: off (no GPU in container)\n{pwa}",
             delta_len = d.delta.len(),
             concept = d.concept,
             nf = d.fields.len(),
             na = d.actions.len(),
             declared = d.fields.len() + 1,
             unsent = UNSENT_POSITION,
+            pwa = if cfg!(feature = "pwa") {
+                "pwa: manifest + shell-only service worker\n"
+            } else {
+                ""
+            },
         ),
     )
 }
@@ -545,6 +561,8 @@ async fn main() {
         .route("/hit", post(hit))
         .route("/hit.bin", get(hit_frame))
         .route("/health", get(health));
+    #[cfg(feature = "pwa")]
+    let app = pwa::routes(app);
 
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -572,6 +590,18 @@ async fn main() {
 mod tests {
     use super::*;
     use a2ui_paint::DeviceClass;
+
+    /// The PWA tags reach the page only with `--features pwa`. Without the
+    /// feature the head addition is empty, so the default page is unchanged.
+    #[test]
+    fn pwa_head_follows_the_feature() {
+        if cfg!(feature = "pwa") {
+            assert!(PWA_HEAD.contains(r#"rel="manifest""#));
+            assert!(PWA_HEAD.contains("serviceWorker"));
+        } else {
+            assert!(PWA_HEAD.is_empty());
+        }
+    }
 
     /// The key resolves to a REAL concept, not the default class.
     ///

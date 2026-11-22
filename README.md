@@ -42,4 +42,4 @@ round-trip: harvest the app → re-render the app, no WinForms.
 
 ## Consumer architecture proposals
 
-- [Morpheus PWA application desktop (three launch modes)](docs/MORPHEUS-PWA-APPLICATION-DESKTOP.md) — **proposal only**: browser-tab desktop, direct Microsoft 365 app launch and installable Morpheus PWA, including ZITADEL/local-mode boundaries and acceptance gates. No implementation implied.
+- [Morpheus PWA application desktop (three launch modes)](docs/MORPHEUS-PWA-APPLICATION-DESKTOP.md) — **proposal only**: browser-tab desktop, direct Microsoft 365 app launch and installable Morpheus PWA, including ZITADEL/local-mode boundaries and acceptance gates. No implementation implied beyond the optional install shell for the paint demo (`--features pwa`, `Dockerfile.pwa.railway`; Railway steps in [docs/RAILWAY-PWA-SERVICE.md](docs/RAILWAY-PWA-SERVICE.md)).

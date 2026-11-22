@@ -4,6 +4,7 @@
 **Date:** 2026-11-22  
 **Owner/scope:** Morpheus consumer of AdaWorldAPI/a2ui-rs  
 **Intent:** A Microsoft 365 app desktop without a default Windows, RDS, ChromeOS, Kasm, or server-side Chromium dependency.
+**Implementation status:** an optional P2 install shell exists for the a2ui paint demo only, behind the `pwa` feature of `a2ui-paint-web` and built by `Dockerfile.pwa.railway`: own-origin manifest, icons, and a service worker that caches the shell and never the live surface. P0, P1, P3, P4 and the Morpheus consumer itself are not implemented.
 
 ## 0. Decision in one paragraph
 

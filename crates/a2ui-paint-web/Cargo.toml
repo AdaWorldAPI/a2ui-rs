@@ -43,3 +43,10 @@ a2ui-wasm = { path = "../a2ui-wasm" }
 
 axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+
+[features]
+# Optional installable-app shell (manifest, shell-only service worker, icons):
+# slice P2 of docs/MORPHEUS-PWA-APPLICATION-DESKTOP.md. Off by default, so the
+# default build and `Dockerfile.railway` are unchanged; `Dockerfile.pwa.railway`
+# builds with it on.
+pwa = []
