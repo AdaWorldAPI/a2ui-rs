@@ -1,0 +1,74 @@
+/* Theme palettes: colour custom properties only, never layout. Ported from the reference application
+   (frontend/static/css/themes.css) plus the hub default. Everything else derives via color-mix. */
+/* Default: the Service Hub prototype's design language (.claude/.template/): navy sidebar,
+   light page, white cards, blue-teal primary, uppercase small labels. */
+:root[data-theme="hub"]{--bg:#f4f6f9;--fg:#1d2a3a;--accent:#1e6b8f;--border:#dde3ea;--card-bg:#ffffff;--side-bg:#1b3a62;--h1:#13294a;--side-fg:#ffffff;--side-active:rgba(255,255,255,.13);--side-hover:rgba(255,255,255,.07);--radius:10px;--radius-sm:8px}
+:root[data-theme="hub"] th,:root[data-theme="hub"] .kpi .l{text-transform:uppercase;font-size:11px;letter-spacing:.05em;color:#6b7a8c;font-weight:600}
+/* Feng Shui: the teal-green palette that was the Hub default before the prototype's design. */
+:root[data-theme="fengshui"]{--bg:#f3f7f7;--fg:#1b2a33;--accent:#0f8b72;--border:#dbe5e5;--card-bg:#ffffff;--side-bg:#ffffff;--h1:#13312c;--side-fg:#1b2a33;--side-active:color-mix(in srgb,var(--accent) 13%,#ffffff);--side-hover:color-mix(in srgb,var(--accent) 7%,#ffffff)}
+/* The prototype's dark-blue Hub with the brand palette swapped in (brand-office skill:
+   BRAND_RED #C8102E, BRAND_GREY #4A4A4A, BRAND_BLACK #1A1A1A) and the Service Hub design board
+   tokens (panels 26-28): Markenstil sidebar Hub blue #0D3A64 with a brand-red active item,
+   border #E0E6EC, radius 14px, shadow 0 4px 16px rgba(0,0,0,.08), 2px brand-red focus ring.
+   Headlines stay near-black. */
+:root[data-theme="brand"]{--bg:#f5f5f5;--fg:#1a1a1a;--accent:#c8102e;--border:#e0e6ec;--card-bg:#ffffff;--side-bg:#0d3a64;--h1:#1a1a1a;--side-fg:#ffffff;--side-active:#c8102e;--side-hover:rgba(255,255,255,.08);--radius:14px;--radius-sm:10px;--elev-1:0 4px 16px rgba(0,0,0,.08);--elev-2:0 8px 24px rgba(0,0,0,.10)}
+:root[data-theme="brand"] :focus-visible{outline:2px solid #c8102e;outline-offset:2px}
+:root[data-theme="brand"] th,:root[data-theme="brand"] .kpi .l{text-transform:uppercase;font-size:11px;letter-spacing:.05em;color:#4a4a4a;font-weight:600}
+:root[data-theme="breathe"]{--bg:#f5f5f7;--fg:#1d1d1f;--accent:#0071e3;--border:#e3e3e8;--card-bg:#ffffff;--side-bg:#fbfbfd;--side-fg:#1d1d1f;--side-active:color-mix(in srgb,var(--accent) 10%,#ffffff);--side-hover:color-mix(in srgb,var(--accent) 5%,#ffffff);--h1:#1d1d1f;--radius:18px;--radius-sm:10px;--elev-1:0 2px 12px rgba(0,0,0,.05);--elev-2:0 12px 32px rgba(0,0,0,.08);--pad:22px;--title-size:30px}
+:root[data-theme="work"]{--bg:#f6f8fb;--fg:#1d273b;--accent:#206bc4;--border:#e6e7e9;--card-bg:#ffffff;--side-bg:#ffffff;--side-fg:#1d273b;--side-active:color-mix(in srgb,var(--accent) 12%,#ffffff);--side-hover:color-mix(in srgb,var(--accent) 6%,#ffffff);--h1:#1d273b;--radius:4px;--radius-sm:3px;--elev-1:none;--elev-2:0 2px 6px rgba(29,39,59,.08)}
+:root[data-theme="command"]{--bg:#0b1220;--fg:#e6edf6;--accent:#14b8a6;--border:#22314f;--card-bg:#111a2e;--side-bg:#0a1020;--side-fg:#e6edf6;--h1:#f1f5f9;--radius:10px;--radius-sm:6px;--elev-1:0 1px 0 rgba(255,255,255,.04);--elev-2:0 10px 28px rgba(0,0,0,.45)}
+:root[data-theme="hub-blue"]{--bg:#f3f5f9;--fg:#1d2530;--accent:#2d6cb5;--border:#d9dfe8;--card-bg:#ffffff;--side-bg:#0f2a4a;--side-fg:#ffffff}
+:root[data-theme="office"]{--bg:#f7f7f8;--fg:#1c1c1e;--accent:#0a6cff;--border:#d8d8dc;--card-bg:#ffffff;--side-bg:#24364d;--side-fg:#ffffff}
+:root[data-theme="unity"]{--bg:#2c001e;--fg:#f2e9e4;--accent:#e95420;--border:#5e2750;--card-bg:#3a0a2a;--side-bg:#200016;--side-fg:#f2e9e4}
+:root[data-theme="moca"]{--bg:#efe7de;--fg:#3b2f2a;--accent:#8a5a3b;--border:#cdbba9;--card-bg:#faf5ef;--side-bg:#4a382f;--side-fg:#f5ebe0}
+/* RPT-THEME-CLEANUP-1 Mint: lighter, softer derivative of Teal. Accent darkened from the
+   proposed #258C70 (4.15:1 on white) to #1F7A61 (5.23:1 white, 4.84:1 page) for AA text. */
+:root[data-theme="mint"]{--bg:#f0f8f4;--fg:#243c35;--accent:#1f7a61;--border:#cfe4da;--card-bg:#ffffff;--side-bg:#f8fcfa;--h1:#1c322b;--side-fg:#243c35;--side-active:color-mix(in srgb,var(--accent) 13%,#ffffff);--side-hover:color-mix(in srgb,var(--accent) 7%,#ffffff)}
+/* RPT-THEME-CLEANUP-1 Citrus: fresh vanilla-yellow, light warm sidebar, charcoal text. Accent
+   darkened from the proposed #B68A16 (3.16:1 on white) to #7A5C08 (5.67:1 on the sidebar). */
+:root[data-theme="citrus"]{--bg:#fffbea;--fg:#34342c;--accent:#7a5c08;--border:#e8dfae;--card-bg:#fffdf5;--side-bg:#fff4cb;--h1:#2a2a22;--side-fg:#34342c;--side-active:color-mix(in srgb,#d9a91a 30%,#fff4cb);--side-hover:color-mix(in srgb,#d9a91a 14%,#fff4cb)}
+:root[data-theme="vanilla"]{--bg:#fbf9f0;--fg:#4a463b;--accent:#b8983a;--border:#e7e0c9;--card-bg:#fffdf6;--side-bg:#6b6450;--side-fg:#fffdf6}
+:root[data-theme="aqua"]{--bg:#e6f4fb;--fg:#0b3a52;--accent:#12a5d6;--border:#b6dced;--card-bg:#f4fbfe;--side-bg:#0b3a52;--side-fg:#e6f4fb}
+:root[data-theme="dark"]{--bg:#111318;--fg:#e6e6e9;--accent:#7aa2f7;--border:#2a2e37;--card-bg:#1a1d24;--side-bg:#0b0d11;--side-fg:#e6e6e9}
+:root[data-theme="marble"]{--bg:#e9eaec;--fg:#2b2d31;--accent:#6b7280;--border:#cfd2d6;--card-bg:#f7f8fa;--side-bg:#3b3e44;--side-fg:#f7f8fa}
+:root[data-theme="led"]{--bg:#0c0f14;--fg:#d7ffe7;--accent:#17f0a0;--border:#123024;--card-bg:#10151b;--side-bg:#080b0f;--side-fg:#d7ffe7}
+:root[data-theme="breathing"]{--bg:#f3f6fb;--fg:#23303f;--accent:#4b7bec;--border:#d4deec;--card-bg:#ffffff;--side-bg:#23303f;--side-fg:#f3f6fb}
+:root[data-theme="holo"]{--bg:#06101f;--fg:#dbeaf3;--accent:#55cde8;--border:#1d4a8c;--card-bg:#0a1626;--side-bg:#040b18;--side-fg:#dbeaf3}
+:root[data-theme="holo-tactile"]{--bg:#050b12;--fg:#d5e4ef;--accent:#6fc7e6;--border:#2a4f74;--card-bg:#081826;--side-bg:#03080e;--side-fg:#d5e4ef}
+:root[data-theme="holo-apothecary"]{--bg:#1b1712;--fg:#d9c9a5;--accent:#b6904f;--border:#5f371b;--card-bg:#241a13;--side-bg:#14100c;--side-fg:#d9c9a5}
+/* RPT-HOLO-MATERIAL-1 Holo Glass: the concept palette; its material comes from
+   static/holo-glass/css/holo-glass.css. Accent darkened from the supplied #0B9ECC (2.87:1 on
+   the card) to #08739A (4.96:1 card) for text; the page colour sits behind the glass panels. */
+:root[data-theme="holo-glass"]{--bg:#a6c9e1;--fg:#0b304b;--accent:#08739a;--border:#b7dcec;--card-bg:#edf8ff;--side-bg:#b7d6ea;--side-fg:#123a58;--side-muted:#426b83;--side-active:#39c9ed;--side-hover:rgba(255,255,255,.42);--link:#006e9d;--h1:#0b2d4a;--radius:16px;--radius-sm:10px}
+:root[data-theme="future"]{--bg:#040c18;--fg:#e2eef7;--accent:#4fd6ea;--border:#17456f;--card-bg:#071322;--side-bg:#02070f;--side-fg:#e2eef7}
+/* brand material (design board 23/27, .claude/.template/service-hub-safe): the active
+   register tab is raised and joined to its card with a brand-red edge; the active menu item gets
+   a soft lift. Reduced-motion and reduced-transparency viewers get the flat version. */
+:root[data-theme="brand"] .tab[aria-current="page"]{background:#fff;border:1px solid var(--border);border-bottom-color:transparent;border-radius:12px 12px 0 0;box-shadow:0 -4px 14px rgba(20,35,60,.08),inset 0 1px 0 #fff,inset 0 -2px 0 var(--accent)}
+:root[data-theme="brand"] nav.leftnav a[aria-current="page"]{box-shadow:0 4px 12px rgba(200,16,46,.35),inset 0 1px 0 rgba(255,255,255,.25)}
+@media (prefers-reduced-transparency:reduce),(prefers-reduced-motion:reduce){:root[data-theme="brand"] .tab[aria-current="page"],:root[data-theme="brand"] nav.leftnav a[aria-current="page"]{box-shadow:none}}
+/* brand buttons (design board 25): primary actions (submit, active toggle) in brand red with a
+   soft top highlight; other buttons stay the theme's neutral style. */
+:root[data-theme="brand"] main button[type="submit"]:not([disabled]),:root[data-theme="brand"] .mx button.on{background:linear-gradient(180deg,#d8243f,#c8102e 55%,#a00d24);color:#fff;border:1px solid #a00d24;border-radius:10px;box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 2px 6px rgba(160,13,36,.25)}
+:root[data-theme="brand"] main button[type="submit"]:not([disabled]):hover,:root[data-theme="brand"] .mx button.on:hover{background:#a00d24}
+/* Aqua material (design board 22/23, .claude/.template/service-hub-safe): a floating glass
+   sidebar, a glossy raised active tab and restrained gloss on primary buttons. Geometry and
+   theme keys are unchanged; reduced transparency/motion gets a solid, flat fallback. */
+:root[data-theme="aqua"] .shell:not([data-state=arrival]) nav.leftnav{--side-fg:#0b3a52;--muted:#4a6577;color:#0b3a52;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.88);border-radius:18px;margin:12px;box-shadow:0 18px 44px rgba(25,34,52,.14),0 3px 8px rgba(25,34,52,.06);-webkit-backdrop-filter:blur(18px) saturate(145%);backdrop-filter:blur(18px) saturate(145%)}
+:root[data-theme="aqua"] .tab[aria-current="page"]{border:1px solid rgba(55,105,157,.4);border-bottom-color:transparent;border-radius:11px 11px 0 0;background:linear-gradient(180deg,#fff 0%,#e6f3ff 35%,#c5e2fc 70%,#f8fcff 100%);box-shadow:0 -3px 12px rgba(20,67,116,.12),inset 0 1px 0 rgba(255,255,255,.95)}
+:root[data-theme="aqua"] main button[type="submit"]:not([disabled]){border-radius:11px;background:linear-gradient(180deg,#dff5ff,#51b8f0 46%,#127ab7 53%,#0874b9);color:#fff;border:1px solid #12649a;box-shadow:inset 0 1px 0 rgba(255,255,255,.85),0 2px 5px rgba(20,60,90,.2)}
+:root[data-theme="aqua"] :focus-visible{outline:3px solid #12649a;outline-offset:2px}
+@supports not (backdrop-filter:blur(1px)){:root[data-theme="aqua"] .shell:not([data-state=arrival]) nav.leftnav{background:#f8fafc}}
+@media (prefers-reduced-transparency:reduce),(prefers-reduced-motion:reduce){:root[data-theme="aqua"] .shell:not([data-state=arrival]) nav.leftnav{background:#f8fafc;backdrop-filter:none;-webkit-backdrop-filter:none;box-shadow:none}:root[data-theme="aqua"] .tab[aria-current="page"],:root[data-theme="aqua"] main button[type="submit"]{box-shadow:none}}
+/* RPT-MATERIAL-LAB-1 optics: a neutral rim, shadow and inset bevel. Surface colour stays the
+   theme's (--card-bg on panels only); buttons and tabs keep their brand background. */
+:root[data-material="elevation"] .card,:root[data-material="elevation"] .wb-page,:root[data-material="elevation"] main.pane,:root[data-material="elevation"] nav.leftnav a[aria-current],:root[data-material="elevation"] button,:root[data-material="elevation"] .tab,:root[data-material="frosted"] .card,:root[data-material="frosted"] .wb-page,:root[data-material="frosted"] main.pane,:root[data-material="frosted"] nav.leftnav a[aria-current],:root[data-material="frosted"] button,:root[data-material="frosted"] .tab{border:1px solid color-mix(in srgb,var(--border) 80%,#fff);box-shadow:0 1px 2px rgba(15,23,42,.06),0 6px 16px rgba(15,23,42,.08),inset 0 1px 0 rgba(255,255,255,.55)}
+:root[data-material="elevation"] .card,:root[data-material="elevation"] .wb-page,:root[data-material="frosted"] .card,:root[data-material="frosted"] .wb-page{background:var(--card-bg)}
+/* Frosted Glass: the panels become translucent over the page, blurred. Only panels carry a backdrop. */
+:root[data-material="frosted"] .card,:root[data-material="frosted"] .wb-page{background:color-mix(in srgb,var(--card-bg) 82%,transparent);-webkit-backdrop-filter:blur(10px) saturate(105%);backdrop-filter:blur(10px) saturate(105%)}
+@media (prefers-reduced-transparency:reduce),(forced-colors:active){:root[data-material="frosted"] .card,:root[data-material="frosted"] .wb-page{background:var(--card-bg);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@supports not (backdrop-filter:blur(1px)){:root[data-material="frosted"] .card,:root[data-material="frosted"] .wb-page{background:var(--card-bg);-webkit-backdrop-filter:none;backdrop-filter:none}}
+/* RPT-MATERIAL-LAB-1 generation: the radius grammar only; palette untouched. Appended last so it
+   wins over the theme blocks, which set the same tokens at the same specificity. */
+:root[data-generation="classic"]{--radius:4px;--radius-sm:3px}
+:root[data-generation="modern"]{--radius:14px;--radius-sm:10px}

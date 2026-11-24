@@ -1,0 +1,69 @@
+/* RPT-LOCAL-TYPE-1 — PROPOSAL ONLY. Not linked by templates/base.html yet.
+   Enable only after vetted WOFF2 files are vendored and the Rust static route
+   explicitly serves all four paths. All URLs are same-origin; no font CDN. */
+
+/* Full Latin + Latin-extended coverage must be verified on the supplied binaries.
+   Do not declare a unicode-range unless the actual font has been subset to match. */
+@font-face {
+  font-family: "Report Inter";
+  src: url("./inter-roman-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Report Inter";
+  src: url("./inter-italic-variable.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Report Google Sans Flex";
+  src: url("./google-sans-flex-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 25% 151%;
+  font-display: swap;
+}
+
+/* Typography is orthogonal to data-theme, data-material, data-density and
+   data-lens. No selectors below may change palette, geometry, RBAC or content. */
+:root {
+  --font-ui-fallback: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-ui: "Report Inter", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-display: var(--font-ui);
+  --font-data: var(--font-ui);
+  --font-code: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+}
+
+/* Optional future preference; only two explicit allowlisted values. */
+:root[data-font="inter"] {
+  --font-ui: "Report Inter", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  --font-display: var(--font-ui);
+}
+:root[data-font="google-flex"] {
+  --font-ui: "Report Google Sans Flex", "Report Inter", "Segoe UI", system-ui, sans-serif;
+  --font-display: var(--font-ui);
+}
+
+/* Keep existing font size, weight, density and line-height from base.html. */
+:root:is([data-font="inter"],[data-font="google-flex"]) body {
+  font-family: var(--font-ui);
+  font-optical-sizing: auto;
+  font-kerning: normal;
+}
+:root:is([data-font="inter"],[data-font="google-flex"]) :is(button,input,select,textarea) {
+  font-family: inherit;
+}
+:root:is([data-font="inter"],[data-font="google-flex"]) :is(h1,h2,h3,.brand .b1) {
+  font-family: var(--font-display);
+}
+:root:is([data-font="inter"],[data-font="google-flex"]) :is(code,pre,kbd,samp,.ck-cats a b) {
+  font-family: var(--font-code);
+}
+/* Optional future experiment, not a theme preset: a modest roundness accent.
+   Never make rounded type dependent on the Holo Glass optical material. */
+:root[data-font="google-flex"][data-font-shape="soft"] :is(h1,h2,.brand .b1) {
+  font-variation-settings: "ROND" 12, "wdth" 100;
+}

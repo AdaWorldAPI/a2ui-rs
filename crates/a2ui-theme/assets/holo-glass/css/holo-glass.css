@@ -1,0 +1,479 @@
+/*
+ * SERVICE HUB | HOLO GLASS MATERIAL 1.0
+ * Preview-sourced visual concept, not a claim of an existing production theme.
+ * Load AFTER report-rs base.html inline styles and templates/themes.css.
+ * Material is independent of the theme; no layout, role or route changes here.
+ * (c) project-owned generated visual material; no proprietary icons/fonts bundled.
+ */
+
+/* Palette (RPT-HOLO-MATERIAL-1): the holo-glass colour palette lives with every other theme
+   in templates/themes.css; this file is the material only. Use data-theme="holo-glass", or
+   keep data-theme="brand" etc. and add data-material="holo-glass". */
+
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) {
+  --hg-ink: #11374f;
+  --hg-ink-soft: #3a5e72;
+  --hg-glass-top: rgb(252 255 255 / .91);
+  --hg-glass-bottom: rgb(210 238 251 / .79);
+  --hg-menu-top: rgb(245 252 255 / .86);
+  --hg-menu-bottom: rgb(204 231 249 / .75);
+  --hg-white-rim: rgb(255 255 255 / .91);
+  --hg-cyan-rim: rgb(0 205 251 / .55);
+  --hg-shadow: 0 16px 43px rgb(21 67 108 / .20), 0 4px 11px rgb(19 63 109 / .09);
+  --hg-elevation: 0 11px 32px rgb(26 79 126 / .15), 0 2px 8px rgb(26 79 126 / .07);
+  --hg-contrast-backplate: rgb(239 250 255 / .92);
+  --hg-focus: #0b749d;
+  --hg-sky-top: #d1eaf6;
+  --hg-sky-mid: #94bbd9;
+  --hg-sky-end: #e7d4e4;
+  --hg-control-min: 44px;
+  --hg-blur: 20px;
+  --hg-saturate: 145%;
+  color-scheme: light;
+}
+
+/* brand red remains a brand/accent token; only the material gets cool highlights. */
+:root[data-theme="brand"][data-material="holo-glass"] {
+  --hg-ink: #15354c;
+  --hg-glass-bottom: rgb(213 238 250 / .85);
+  --hg-focus: #a00d24;
+  --hg-sky-top: #d9e3eb;
+  --hg-sky-mid: #a5c1da;
+  --hg-sky-end: #e7ced8;
+}
+/* Dark themes use an opaque dark laminate instead of putting dark text on a dark backdrop.
+   RPT-HOLO-MATERIAL-1: every dark palette in themes.css (dark, command, unity, led, holo,
+   holo-tactile, holo-apothecary, future), so none of them puts light ink on light glass. */
+:root[data-material="holo-glass"]:is([data-theme="dark"],[data-theme="command"],[data-theme="unity"],[data-theme="led"],[data-theme="holo"],[data-theme="holo-tactile"],[data-theme="holo-apothecary"],[data-theme="future"]) {
+  --hg-ink: #e5f6ff;
+  --hg-ink-soft: #c9e6f6;
+  --hg-glass-top: rgb(27 57 80 / .94);
+  --hg-glass-bottom: rgb(14 43 67 / .91);
+  --hg-menu-top: rgb(32 65 86 / .94);
+  --hg-menu-bottom: rgb(12 44 66 / .94);
+  --hg-white-rim: rgb(175 233 254 / .37);
+  --hg-contrast-backplate: rgb(22 52 73 / .96);
+  color-scheme: dark;
+}
+/* The top bar and the inactive tabs carry a light frosted gradient of their own; under the
+   dark laminate they take the laminate too, or the light ink would sit on light glass. */
+:root[data-material="holo-glass"]:is([data-theme="dark"],[data-theme="command"],[data-theme="unity"],[data-theme="led"],[data-theme="holo"],[data-theme="holo-tactile"],[data-theme="holo-apothecary"],[data-theme="future"]) :is(header.topbar,.wb-tabs a:not([aria-current="page"])) {
+  background: linear-gradient(165deg,var(--hg-glass-top),var(--hg-glass-bottom));
+}
+
+/* Chromatic ambient background replaces a flattened Photoshop composition. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) body,
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .shell {
+  background-color: var(--bg, #b2d2e7);
+  background-image:
+    url('../assets/effects/ambient-ribbons.png'),
+    url('../assets/effects/ambient-glow.png'),
+    linear-gradient(130deg, var(--hg-sky-top) 0%, var(--hg-sky-mid) 51%, #a1bfd9 80%, var(--hg-sky-end) 100%);
+  background-position: center, center, center;
+  background-size: cover, cover, cover;
+  background-repeat: no-repeat;
+}
+
+/* Navigation surface (RPT-HOLO-MATERIAL-1): ONE glass panel, owned by the outer 210px
+   aside.side (see the end of this file). nav.leftnav inside it carries only links, so the
+   former nav.leftnav surface rule was removed to avoid a second frame and double shadow. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav a,
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav span {
+  color: var(--hg-ink);
+  text-shadow: 0 1px 0 rgb(255 255 255 / .13);
+  border-radius: 12px;
+  min-height: var(--hg-control-min);
+  transition: background .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav a:hover {
+  background: rgb(244 253 255 / .65);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .65);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav a[aria-current="page"] {
+  background: linear-gradient(180deg, #72f2fc 0%, #0ebddd 46%, #079fcf 100%);
+  border-color: rgb(18 155 203 / .65);
+  box-shadow: 0 6px 17px rgb(0 142 207 / .31), inset 0 1px 0 rgb(255 255 255 / .82);
+  color: #072f4b;
+  font-weight: 750;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav .grp {
+  color: var(--hg-ink-soft);
+}
+
+/* Top bar is a framed frosted sheet rather than an opaque red wall. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) header.topbar {
+  background: linear-gradient(105deg,rgb(248 254 255 / .89),rgb(210 240 252 / .74));
+  border-bottom: 1px solid var(--hg-white-rim);
+  box-shadow: 0 4px 17px rgb(23 71 111 / .08), inset 0 1px 0 rgb(255 255 255 / .8);
+  color: var(--hg-ink);
+  -webkit-backdrop-filter: blur(15px) saturate(135%);
+  backdrop-filter: blur(15px) saturate(135%);
+}
+
+/* Upper tabs are perspective/navigation, never the 70px worksheet rail. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  position: relative;
+  z-index: 1;
+  padding-inline: 12px;
+  overflow-x: auto;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-tabs a {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  color: var(--hg-ink);
+  font-weight: 650;
+  text-decoration: none;
+  min-height: 50px;
+  padding: 13px 23px 11px;
+  border: 1px solid var(--hg-white-rim);
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  margin-right: 0;
+  background: linear-gradient(180deg, rgb(255 255 255 / .85),rgb(215 240 252 / .76));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .96),0 -4px 12px rgb(27 81 117 / .09);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  white-space: nowrap;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-tabs a[aria-current="page"] {
+  color: #07364e;
+  background: linear-gradient(180deg,#9af9fc 0%,#26d3ed 28%,#0aabd8 83%,#16b9da 100%);
+  border-color: rgb(0 214 247 / .85);
+  transform: translateY(-1px);
+  box-shadow: 0 -4px 18px rgb(0 202 245 / .28),inset 0 1px 0 rgb(255 255 255 / .96),inset 0 -2px 0 rgb(31 124 174 / .35);
+}
+
+/* Two equal real book pages. This CSS does not assign any grid widths: a2ui owns geometry. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-page,
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .a2-duo > :is(section,article),
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .card {
+  color: var(--hg-ink);
+  background: linear-gradient(165deg,var(--hg-glass-top),var(--hg-glass-bottom));
+  border: 1px solid var(--hg-white-rim);
+  border-radius: 21px;
+  box-shadow: var(--hg-elevation), inset 0 1px 0 rgb(255 255 255 / .86);
+  -webkit-backdrop-filter: blur(16px) saturate(135%);
+  backdrop-filter: blur(16px) saturate(135%);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-page {
+  min-width: 0;
+  padding: 18px;
+  overflow: auto;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.card) h2 {
+  color: var(--hg-ink);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-page :is(input,select) {
+  background: var(--hg-contrast-backplate);
+  color: var(--hg-ink);
+  border: 1px solid rgb(116 169 196 / .55);
+  border-radius: 11px;
+  min-height: 39px;
+}
+
+/* Opaque typographic layer: DO NOT lower text opacity for a glass effect. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.wb-rail,.wb-tabs,nav.leftnav) :is(a,button,span,p,dt,dd,th,td) {
+  text-shadow: 0 1px 0 rgb(255 255 255 / .13);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.card) :is(th,td) {
+  border-bottom-color: rgb(128 176 202 / .32);
+}
+
+/* 70px right-side technology worksheets, labels remain actual HTML, no hardcoded names. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail {
+  gap: 0;
+  min-width: 0;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail a {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 70px;
+  min-height: 72px;
+  padding: 0 6px 11px;
+  overflow-wrap: anywhere;
+  color: #093a53;
+  font: 650 11px/1.1 system-ui,sans-serif;
+  background-color: transparent;
+  background-position: center;
+  background-size: 70px 72px;
+  background-repeat: no-repeat;
+  background-image: image-set(url('../assets/rail/rail_shell__idle@1x.png') 1x,url('../assets/rail/rail_shell__idle@2x.png') 2x,url('../assets/rail/rail_shell__idle@3x.png') 3x);
+  text-align: center;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail a:hover {
+  background-image: image-set(url('../assets/rail/rail_shell__hover@1x.png') 1x,url('../assets/rail/rail_shell__hover@2x.png') 2x,url('../assets/rail/rail_shell__hover@3x.png') 3x);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail a[aria-current="page"] {
+  background-image: image-set(url('../assets/rail/rail_shell__active@1x.png') 1x,url('../assets/rail/rail_shell__active@2x.png') 2x,url('../assets/rail/rail_shell__active@3x.png') 3x);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail a[aria-disabled="true"] {
+  opacity: .55;
+  background-image: url('../assets/rail/rail_shell__disabled@1x.png');
+}
+
+/* Small controls and the reversible interaction hint. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.kpi,.wb-day,.wb-hint,.wb-inspector) {
+  color: var(--hg-ink);
+  border: 1px solid var(--hg-white-rim);
+  border-radius: 14px;
+  background: linear-gradient(155deg,var(--hg-glass-top),var(--hg-glass-bottom));
+  box-shadow: 0 6px 18px rgb(33 77 112 / .09),inset 0 1px 0 rgb(255 255 255 / .86);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-hint {
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-demo {
+  color: #543d08;
+  background: #fff6d9;
+  border-color: #9a6b06;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(a,button,input,select):focus-visible {
+  outline: 3px solid var(--hg-focus);
+  outline-offset: 2px;
+}
+
+/* Visual quality must never depend on a transparency-capable screen/browser. */
+@supports not (backdrop-filter: blur(1px)) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.card,.wb-hint) {
+    background: var(--hg-contrast-backplate);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.card,.wb-tabs a,.wb-hint,.wb-day,header.topbar) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: var(--hg-contrast-backplate);
+    box-shadow: none;
+    border: 1px solid currentColor;
+  }
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.wb-tabs,nav.leftnav) * {
+    text-shadow: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav a,
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-tabs a {
+    transition: none;
+    transform: none;
+  }
+}
+@media (max-width: 900px) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .wb-rail a {
+    flex: 0 0 70px;
+  }
+}
+
+/* report-rs template reality: 210px region is aside.side, with nav.leftnav INSIDE it.
+   The outer aside owns the glass surface; clear Aqua's legacy inner-nav glass frame to
+   prevent double borders and preserve the a2ui-rs 210px allocated track. */
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+  box-sizing: border-box;
+  margin: 10px;
+  min-width: 0;
+  color: var(--hg-ink);
+  --side-fg: var(--hg-ink);
+  --side-muted: var(--hg-ink-soft);
+  --side-rule: rgb(74 124 155 / .29);
+  /* The ink above is dark, so every token the sidebar's descendants paint a background
+     with must be light too: .ctxpanel mixes --side-bg, .ctx-search input uses it directly,
+     and hover/active rows use --side-hover/--side-active. Without these, dark palettes
+     (hub, brand, dark ...) keep a dark panel under the dark ink. */
+  --side-bg: rgb(255 255 255 / .62);
+  --side-hover: rgb(255 255 255 / .48);
+  --side-active: rgb(150 225 245 / .72);
+  background: linear-gradient(155deg,var(--hg-menu-top),var(--hg-menu-bottom));
+  border: 1px solid var(--hg-white-rim);
+  border-radius: 22px;
+  box-shadow: var(--hg-shadow), inset 0 1px 0 rgb(255 255 255 / .83);
+  -webkit-backdrop-filter: blur(var(--hg-blur)) saturate(var(--hg-saturate));
+  backdrop-filter: blur(var(--hg-blur)) saturate(var(--hg-saturate));
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side nav.leftnav {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  overflow: visible;
+}
+:root:is([data-material="holo-glass"],[data-theme="holo-glass"]) aside.side :is(.side-foot,.ctxpanel) {
+  color: var(--hg-ink-soft);
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+    background: var(--hg-contrast-backplate);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    border: 1px solid currentColor;
+  }
+}
+@supports not (backdrop-filter: blur(1px)) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+    background: var(--hg-contrast-backplate);
+  }
+}
+
+
+/* ---------------------------------------------------------------------------
+ * RPT-HOLO-OPTICAL-V2 — theme-neutral optical substrate, its own material key `holo-v2`
+ * (menu "Holo Glass V2"). Scoped off `holo-glass` so the original Aqua Holo Glass stays untouched.
+ * See .claude/plans/holo-glass-optical-substrate-v2.md.
+ * Keep theme=holo-glass chromatic intentionally; do not export its sky/cyan to
+ * brand, Hub, Dark etc. This follows older rules so it overrides them.
+ * This CSS adds optics; it does not own layout or semantic palette.
+ * --------------------------------------------------------------------------- */
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) {
+  --hg-ink: var(--fg);
+  --hg-ink-soft: color-mix(in srgb, var(--fg) 74%, var(--bg));
+  --hg-glass-top: color-mix(in srgb, var(--card-bg) 94%, transparent);
+  --hg-glass-bottom: color-mix(in srgb, var(--card-bg) 84%, transparent);
+  --hg-menu-top: color-mix(in srgb, var(--side-bg) 94%, transparent);
+  --hg-menu-bottom: color-mix(in srgb, var(--side-bg) 87%, transparent);
+  --hg-white-rim: color-mix(in srgb, var(--border) 54%, white);
+  --hg-cyan-rim: color-mix(in srgb, var(--accent) 16%, var(--border));
+  --hg-shadow: 0 12px 30px rgb(0 0 0 / .13), 0 2px 7px rgb(0 0 0 / .07);
+  --hg-elevation: 0 8px 24px rgb(0 0 0 / .10), 0 1px 4px rgb(0 0 0 / .05);
+  --hg-contrast-backplate: var(--card-bg);
+  --hg-focus: var(--accent);
+  --hg-blur: 10px;
+  --hg-saturate: 105%;
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) body,
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell {
+  background-color: var(--bg);
+  background-image: none;
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) header.topbar {
+  background: color-mix(in srgb, var(--card-bg) 94%, transparent);
+  color: var(--fg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 10px rgb(0 0 0 / .06);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(
+  .wb-page,.a2-duo > section,.a2-duo > article,.card,.kpi,.wb-day,.wb-hint,.wb-inspector
+) {
+  color: var(--fg);
+  background: var(--hg-glass-top);
+  border-color: var(--hg-white-rim);
+  border-radius: var(--radius, 12px);
+  box-shadow: var(--hg-elevation), inset 0 1px 0 rgb(255 255 255 / .20);
+  -webkit-backdrop-filter: blur(var(--hg-blur)) saturate(var(--hg-saturate));
+  backdrop-filter: blur(var(--hg-blur)) saturate(var(--hg-saturate));
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(.wb-page,.card) h2 {
+  color: var(--h1, var(--fg));
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .wb-page :is(input,select) {
+  color: var(--fg);
+  background: var(--card-bg);
+  border-color: var(--border);
+  border-radius: var(--radius-sm, 8px);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .wb-tabs a {
+  color: var(--fg);
+  background: var(--card-bg);
+  border-color: var(--border);
+  border-radius: var(--radius, 12px) var(--radius, 12px) 0 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18), 0 -3px 10px rgb(0 0 0 / .045);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .wb-tabs a[aria-current="page"] {
+  color: var(--fg);
+  background: var(--card-bg);
+  border-color: var(--border);
+  border-bottom: 2px solid var(--accent);
+  transform: none;
+  box-shadow: 0 -3px 12px rgb(0 0 0 / .07), inset 0 2px 0 var(--accent);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+  --side-hover: color-mix(in srgb, var(--side-fg) 8%, transparent);
+  color: var(--side-fg);
+  background: var(--hg-menu-top);
+  border-color: color-mix(in srgb, var(--side-fg) 22%, transparent);
+  border-radius: var(--radius, 12px);
+  box-shadow: var(--hg-shadow), inset 0 1px 0 rgb(255 255 255 / .14);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) nav.leftnav :is(a,span) {
+  color: var(--side-fg);
+  border-radius: var(--radius-sm, 8px);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) nav.leftnav a:hover {
+  background: var(--side-hover, color-mix(in srgb, var(--side-fg) 7%, transparent));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .10);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) nav.leftnav a[aria-current="page"] {
+  background: var(--side-active, var(--accent));
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  box-shadow: 0 4px 12px rgb(0 0 0 / .15), inset 0 1px 0 rgb(255 255 255 / .23);
+  color: var(--side-fg);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) nav.leftnav .grp,
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) aside.side :is(.side-foot,.ctxpanel) {
+  color: var(--side-fg);
+  opacity: 1;
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .wb-rail a {
+  color: var(--fg);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(a,button,input,select):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+@supports not (backdrop-filter: blur(1px)) {
+  :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(.wb-page,.card,.wb-hint,.a2-duo > section,.a2-duo > article) {
+    background: var(--card-bg);
+  }
+  :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+    background: var(--side-bg);
+  }
+}
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(.wb-page,.card,.wb-tabs a,.wb-hint,.wb-day,header.topbar,.a2-duo > section,.a2-duo > article) {
+    background: var(--card-bg);
+    color: var(--fg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    border: 1px solid currentColor;
+  }
+  :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+    background: var(--side-bg);
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* RPT-ARRIVAL-TILES-1: on the start page the same nav renders as light tiles. The sidebar's
+   light-on-dark colours above must not reach them (the titles were white on white). */
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav :is(a,span) {
+  color: var(--fg);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav a[aria-current="page"] {
+  color: #fff;
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav a[aria-current="page"] .blurb {
+  color: rgb(255 255 255 / .86);
+}
+:root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav span[aria-disabled="true"] {
+  color: var(--muted);
+}
