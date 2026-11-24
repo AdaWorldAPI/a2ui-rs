@@ -299,12 +299,34 @@ pub fn https_url_ok(raw: &str) -> bool {
     let Some(rest) = raw.strip_prefix("https://") else {
         return false;
     };
-    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
-    !host.is_empty()
-        && !host.contains('@')
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    host_ok(authority)
         && raw.chars().all(|c| {
             c.is_ascii_graphic() && !matches!(c, '"' | '\'' | '<' | '>' | '\\' | '(' | ')' | '`')
         })
+}
+
+/// The authority of an `https` address: a non-empty host (a name, or a bracketed IPv6
+/// address) and an optional numeric port; no credentials.
+fn host_ok(authority: &str) -> bool {
+    if authority.contains('@') {
+        return false;
+    }
+    let (host, port) = match authority.strip_prefix('[') {
+        Some(v6) => match v6.split_once(']') {
+            Some((addr, rest)) if !addr.is_empty() => ("[v6]", rest),
+            _ => return false,
+        },
+        None => match authority.split_once(':') {
+            Some((h, p)) => (h, &authority[h.len()..][..1 + p.len()]),
+            None => (authority, ""),
+        },
+    };
+    let port_ok = match port.strip_prefix(':') {
+        None => port.is_empty(),
+        Some(p) => !p.is_empty() && p.len() <= 5 && p.bytes().all(|b| b.is_ascii_digit()),
+    };
+    !host.is_empty() && port_ok
 }
 
 /// Escapes text for HTML text and double-quoted attributes.
@@ -474,6 +496,9 @@ mod tests {
             "https://",
             "https://u@x.example/",
             "https://x.example/a\"b",
+            "https://:443/logo.png",
+            "https://x.example:/l.png",
+            "https://[]/l.png",
             "javascript:x",
         ] {
             let err = Identity::from_lookup(|k| (k == "L").then(|| bad.to_string()), "N", "L")
@@ -486,6 +511,18 @@ mod tests {
                 .logo_url
                 .is_none()
         );
+    }
+
+    #[test]
+    fn hosts_with_ports_and_ipv6_are_accepted() {
+        for ok in [
+            "https://x.example/l.png",
+            "https://x.example:8443/l.png",
+            "https://[::1]:443/l.png",
+            "https://[::1]/l.png",
+        ] {
+            assert!(https_url_ok(ok), "{ok}");
+        }
     }
 
     #[test]
