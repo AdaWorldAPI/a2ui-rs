@@ -82,6 +82,45 @@ pub fn theme(key: &str) -> Option<ThemeInfo> {
         .find(|t| t.key.eq_ignore_ascii_case(key))
 }
 
+/// The theme an app opens with when the viewer has chosen none: the key in `var`
+/// (`REPORT_DEFAULT_THEME`, say), read through `get`; the corporate theme when unset or
+/// blank. An unknown key is refused, so a typo fails at start instead of silently
+/// falling back.
+pub fn default_theme(
+    get: impl Fn(&str) -> Option<String>,
+    var: &str,
+) -> Result<ThemeInfo, UnknownTheme> {
+    match get(var).map(|v| v.trim().to_string()) {
+        None => Ok(BRAND),
+        Some(v) if v.is_empty() => Ok(BRAND),
+        Some(v) => theme(&v).ok_or(UnknownTheme {
+            var: var.to_string(),
+            key: v,
+        }),
+    }
+}
+
+/// The corporate theme.
+pub const BRAND: ThemeInfo = ThemeInfo {
+    key: BRAND_KEY,
+    label: None,
+};
+
+/// A default-theme variable names a key that is not in [`THEMES`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownTheme {
+    pub var: String,
+    pub key: String,
+}
+
+impl std::fmt::Display for UnknownTheme {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} names an unknown theme: {:?}", self.var, self.key)
+    }
+}
+
+impl std::error::Error for UnknownTheme {}
+
 /// The corporate palette as plain values, for code that cannot read the stylesheet:
 /// spreadsheet styles, PDF output, a server that renders its own top bar. They are the
 /// values of the `brand` rule in [`THEMES_CSS`]; a test keeps the two equal.
@@ -339,6 +378,20 @@ mod tests {
         assert!(r.contains(&format!("--elev-1:{}", brand::ELEVATION)));
         assert_eq!(format!("#{:06x}", brand::sheet::RED), brand::ACCENT);
         assert!(THEMES_CSS.contains(brand::ACCENT_DARK));
+    }
+
+    #[test]
+    fn the_default_theme_is_a_variable_and_falls_back_to_the_corporate_theme() {
+        let set = |v: &'static str| move |k: &str| (k == "D").then(|| v.to_string());
+        assert_eq!(default_theme(|_| None, "D"), Ok(BRAND));
+        assert_eq!(default_theme(set("  "), "D"), Ok(BRAND));
+        assert_eq!(
+            default_theme(set(" Holo-Glass "), "D").map(|t| t.key),
+            Ok("holo-glass")
+        );
+        let err = default_theme(set("hollo"), "D").unwrap_err();
+        assert_eq!(err.to_string(), r#"D names an unknown theme: "hollo""#);
+        assert!(THEMES.contains(&BRAND));
     }
 
     #[test]
