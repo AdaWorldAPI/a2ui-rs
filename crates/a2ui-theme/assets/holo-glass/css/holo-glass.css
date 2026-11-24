@@ -53,6 +53,7 @@
   --hg-menu-bottom: rgb(12 44 66 / .94);
   --hg-white-rim: rgb(175 233 254 / .37);
   --hg-contrast-backplate: rgb(22 52 73 / .96);
+  --hg-hover-bg: rgb(175 233 254 / .14);
   color-scheme: dark;
 }
 /* The top bar and the inactive tabs carry a light frosted gradient of their own; under the
@@ -86,7 +87,7 @@
   transition: background .16s ease, box-shadow .16s ease, transform .16s ease;
 }
 :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav a:hover {
-  background: rgb(244 253 255 / .65);
+  background: var(--hg-hover-bg, rgb(244 253 255 / .65));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .65);
 }
 :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) nav.leftnav a[aria-current="page"] {
@@ -246,12 +247,16 @@
   }
 }
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
-  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.card,.wb-tabs a,.wb-hint,.wb-day,header.topbar) {
+  :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.card,.wb-tabs a,.wb-hint,.wb-day,header.topbar,.a2-duo > section) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     background: var(--hg-contrast-backplate);
     box-shadow: none;
     border: 1px solid currentColor;
+  }
+  /* Same selector as the dark laminate rule above, so this later rule wins over it. */
+  :root[data-material="holo-glass"]:is([data-theme="dark"],[data-theme="command"],[data-theme="unity"],[data-theme="led"],[data-theme="holo"],[data-theme="holo-tactile"],[data-theme="holo-apothecary"],[data-theme="future"]) :is(header.topbar,.wb-tabs a:not([aria-current="page"])) {
+    background: var(--hg-contrast-backplate);
   }
   :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) :is(.wb-page,.wb-tabs,nav.leftnav) * {
     text-shadow: none;
@@ -285,10 +290,10 @@
   --side-fg: var(--hg-ink);
   --side-muted: var(--hg-ink-soft);
   --side-rule: rgb(74 124 155 / .29);
-  /* The ink above is dark, so every token the sidebar's descendants paint a background
-     with must be light too: .ctxpanel mixes --side-bg, .ctx-search input uses it directly,
-     and hover/active rows use --side-hover/--side-active. Without these, dark palettes
-     (hub, brand, dark ...) keep a dark panel under the dark ink. */
+  /* In the light palettes the ink above is dark, so every token the sidebar's descendants
+     paint a background with must be light too: .ctxpanel mixes --side-bg, .ctx-search input
+     uses it directly, and hover/active rows use --side-hover/--side-active. The dark
+     palettes have light ink and get dark surfaces in the rule after this one. */
   --side-bg: rgb(255 255 255 / .62);
   --side-hover: rgb(255 255 255 / .48);
   --side-active: rgb(150 225 245 / .72);
@@ -298,6 +303,11 @@
   box-shadow: var(--hg-shadow), inset 0 1px 0 rgb(255 255 255 / .83);
   -webkit-backdrop-filter: blur(var(--hg-blur)) saturate(var(--hg-saturate));
   backdrop-filter: blur(var(--hg-blur)) saturate(var(--hg-saturate));
+}
+:root[data-material="holo-glass"]:is([data-theme="dark"],[data-theme="command"],[data-theme="unity"],[data-theme="led"],[data-theme="holo"],[data-theme="holo-tactile"],[data-theme="holo-apothecary"],[data-theme="future"]) .a2-body.shell:not([data-state="arrival"]) aside.side.region-left_nav {
+  --side-bg: rgb(12 44 66 / .62);
+  --side-hover: rgb(175 233 254 / .14);
+  --side-active: rgb(14 189 221 / .32);
 }
 :root:is([data-material="holo-glass"],[data-theme="holo-glass"]) .a2-body.shell:not([data-state="arrival"]) aside.side nav.leftnav {
   box-sizing: border-box;
@@ -447,7 +457,7 @@
   }
 }
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
-  :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(.wb-page,.card,.wb-tabs a,.wb-hint,.wb-day,header.topbar,.a2-duo > section,.a2-duo > article) {
+  :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) :is(.wb-page,.card,.wb-tabs a,.wb-hint,.wb-day,header.topbar,.a2-duo > section,.a2-duo > article,.kpi,.wb-inspector) {
     background: var(--card-bg);
     color: var(--fg);
     -webkit-backdrop-filter: none;
@@ -469,10 +479,13 @@
   color: var(--fg);
 }
 :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav a[aria-current="page"] {
-  color: #fff;
+  /* --side-active is a sidebar colour: white-on-it fails on palettes whose active tile is
+     light (hub). A card tinted with the accent keeps --fg readable on every palette. */
+  background: color-mix(in srgb, var(--accent) 14%, var(--card-bg));
+  color: var(--fg);
 }
 :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav a[aria-current="page"] .blurb {
-  color: rgb(255 255 255 / .86);
+  color: var(--muted, var(--fg));
 }
 :root[data-material="holo-v2"]:not([data-theme="holo-glass"]) .shell[data-state="arrival"] nav.leftnav span[aria-disabled="true"] {
   color: var(--muted);
