@@ -82,6 +82,17 @@ pub fn theme(key: &str) -> Option<ThemeInfo> {
         .find(|t| t.key.eq_ignore_ascii_case(key))
 }
 
+/// The custom-property rule of one theme, `:root[data-theme="<key>"]{…}`, without the
+/// component rules some themes add (buttons, tabs). For an app that brings its own
+/// components and wants only the palette.
+pub fn token_rule(key: &str) -> Option<&'static str> {
+    let t = theme(key)?;
+    let head = format!(r#":root[data-theme="{}"]{{"#, t.key);
+    let start = THEMES_CSS.find(&head)?;
+    let len = THEMES_CSS[start..].find('}')? + 1;
+    Some(&THEMES_CSS[start..start + len])
+}
+
 /// The theme an app opens with when the viewer has chosen none: the key in `var`
 /// (`REPORT_DEFAULT_THEME`, say), read through `get`; the corporate theme when unset or
 /// blank. An unknown key is refused, so a typo fails at start instead of silently
@@ -374,6 +385,19 @@ mod tests {
         keys.dedup();
         assert_eq!(keys.len(), THEMES.len());
         assert!(keys.iter().all(|k| theme(k).is_some()));
+    }
+
+    #[test]
+    fn a_token_rule_is_one_themes_palette_and_nothing_else() {
+        for t in THEMES {
+            let r = token_rule(t.key).unwrap();
+            assert!(r.starts_with(&format!(r#":root[data-theme="{}"]{{"#, t.key)));
+            assert!(r.ends_with('}') && r.matches('{').count() == 1);
+            assert!(r.contains("--accent:"));
+        }
+        assert_eq!(token_rule(" BRAND "), token_rule(BRAND_KEY));
+        assert!(!token_rule(BRAND_KEY).unwrap().contains("button"));
+        assert_eq!(token_rule("nope"), None);
     }
 
     #[test]
