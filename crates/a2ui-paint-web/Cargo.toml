@@ -44,7 +44,8 @@ ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "ma
 a2ui-wasm = { path = "../a2ui-wasm" }
 
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+# `sync`: the lab bounds concurrent map renders with a semaphore.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
 
 [features]
 # Optional installable-app shell (manifest, shell-only service worker, icons):

@@ -80,7 +80,7 @@ struct Canvas {
 impl Canvas {
     fn new(w: u32, h: u32, bg: Rgba) -> Self {
         let mut px = vec![0u8; (w as usize) * (h as usize) * 4];
-        for chunk in px.chunks_exact_mut(4) {
+        for chunk in px.as_chunks_mut::<4>().0 {
             chunk.copy_from_slice(&bg);
         }
         Self { w, h, px }
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(rgba.len(), (w as usize) * (h as usize) * 4);
         // Some pixels differ from the background → text/rects were drawn.
         let bg = RasterTheme::default().background;
-        let non_bg = rgba.chunks_exact(4).filter(|p| *p != bg).count();
+        let non_bg = rgba.as_chunks::<4>().0.iter().filter(|p| **p != bg).count();
         assert!(
             non_bg > 500,
             "expected drawn content, got {non_bg} non-bg px"

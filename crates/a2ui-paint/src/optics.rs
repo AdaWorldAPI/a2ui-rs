@@ -62,7 +62,9 @@ impl Profile {
         }
     }
 
-    /// Slope `dh/dx` by central difference (one-sided at the ends).
+    /// Slope `dh/dx` by central difference. At the ends the difference is taken over the
+    /// half-width step inside `[0, 1]` and still divided by the full width, so it is half the
+    /// true slope there (the prototype's convention, kept for parity).
     #[must_use]
     pub fn slope(self, x: f32) -> f32 {
         let dx = 1e-3;
@@ -109,6 +111,13 @@ pub struct Glass {
     pub spec_exp: f32,
     /// Peak opacity of the specular rim, `[0, 1]`.
     pub spec_opacity: f32,
+    /// Opacity of the glass body's neutral tint (grey 241), `[0, 1]`. Scaled by strength
+    /// like every other term, so strength 0 shows no tint.
+    pub tint: f32,
+    /// Opacity of the Fresnel reflection of a bright environment: white, alpha =
+    /// reflectance (F0 ≈ 4 % on the flat face, rising on the bevel). Independent of the key
+    /// light, unlike the rim.
+    pub reflection: f32,
     /// Effect strength, `[0, 1]`. Scales every optical term; 0 is plain glass.
     pub strength: f32,
 }
@@ -129,6 +138,8 @@ impl Glass {
         light_angle_deg: -110.0,
         spec_exp: 6.0,
         spec_opacity: 0.35,
+        tint: 0.565,
+        reflection: 1.0,
         strength: 1.0,
     };
 
@@ -138,8 +149,31 @@ impl Glass {
         ((self.ior - 1.0) / (self.ior + 1.0)).powi(2)
     }
 
-    fn strength(&self) -> f32 {
-        self.strength.clamp(0.0, 1.0)
+    /// This glass with every non-finite value replaced by the default's, so a NaN or an
+    /// infinity from a caller can never reach the maps (a NaN cast to `u8` is 0, which would
+    /// read as maximum displacement).
+    #[must_use]
+    pub fn sanitized(self) -> Self {
+        let d = Self::DEFAULT;
+        let f = |v: f32, dv: f32| if v.is_finite() { v } else { dv };
+        Self {
+            radius: f(self.radius, d.radius),
+            bezel: f(self.bezel, d.bezel),
+            thickness: f(self.thickness, d.thickness),
+            depth: f(self.depth, d.depth),
+            ior: f(self.ior, d.ior),
+            profile: self.profile,
+            refraction: f(self.refraction, d.refraction),
+            fine_sigma: f(self.fine_sigma, d.fine_sigma),
+            wide_sigma: f(self.wide_sigma, d.wide_sigma),
+            fine_share: f(self.fine_share, d.fine_share),
+            light_angle_deg: f(self.light_angle_deg, d.light_angle_deg),
+            spec_exp: f(self.spec_exp, d.spec_exp),
+            spec_opacity: f(self.spec_opacity, d.spec_opacity),
+            tint: f(self.tint, d.tint),
+            reflection: f(self.reflection, d.reflection),
+            strength: f(self.strength, 0.0),
+        }
     }
 
     /// Lateral displacement (px) of a perpendicular ray entering at normalized bevel
@@ -148,80 +182,191 @@ impl Glass {
     /// the flat face and on total internal reflection.
     #[must_use]
     pub fn displacement(&self, x: f32) -> f32 {
-        let bezel = self.bezel.max(1e-3);
-        let h = self.profile.height(x);
-        // slope of the surface along the outward direction, in px/px
-        let d = self.profile.slope(x) * (self.thickness / bezel);
-        // surface normal in the (outward, z) plane
-        let nl = (d * d + 1.0).sqrt();
-        let (nx, nz) = (d / nl, 1.0 / nl);
-        // incident ray (0, −1); Snell in vector form, eta = 1 / IOR, cos i = nz
-        let eta = 1.0 / self.ior.max(1e-3);
-        let cosi = nz;
-        let k = 1.0 - eta * eta * (1.0 - cosi * cosi);
-        if k < 0.0 {
-            return 0.0;
-        }
-        let m = eta * cosi - k.sqrt();
-        let tx = m * nx;
-        let tz = -eta + m * nz;
-        let travel = h * self.thickness + self.depth;
-        tx / tz.abs() * travel
+        self.sanitized().displacement_inner(x)
     }
 
     /// The one cross-section, reused around the shape.
     #[must_use]
     pub fn cross_section(&self) -> CrossSection {
-        let mut samples = [0.0f32; CROSS_SECTION_SAMPLES + 1];
-        let mut max = 0.0f32;
-        for (i, s) in samples.iter_mut().enumerate() {
-            *s = self.displacement(i as f32 / CROSS_SECTION_SAMPLES as f32);
-            max = max.max(s.abs());
-        }
-        CrossSection { samples, max }
+        self.sanitized().cross_section_inner()
     }
 
     /// The filter parameters for this glass at its strength, given the cross-section's
     /// maximum. At strength 0 every value is the identity.
     #[must_use]
     pub fn filter_params(&self, max_displacement: f32) -> FilterParams {
+        let max = if max_displacement.is_finite() {
+            max_displacement
+        } else {
+            0.0
+        };
+        self.sanitized().filter_params_inner(max)
+    }
+
+    /// The displacement map alone. It depends on the shape, the profile, the thickness, the
+    /// depth and the index only: not on colour, light direction, rim or scattering, and on
+    /// strength only in that strength 0 gives the neutral map (the filter scale carries the
+    /// strength otherwise). A renderer can therefore keep it cached across those changes.
+    #[must_use]
+    pub fn render_displacement(&self, width: u32, height: u32, cs: &CrossSection) -> Vec<u8> {
+        self.sanitized()
+            .render_displacement_inner(width, height, cs)
+    }
+
+    /// The specular rim alone: white, intensity in alpha. Depends on the shape, the profile,
+    /// the index, the light direction, the rim exponent and opacity and the strength; not on
+    /// colour.
+    #[must_use]
+    pub fn render_specular(&self, width: u32, height: u32) -> Vec<u8> {
+        self.sanitized().render_specular_inner(width, height)
+    }
+
+    fn strength(&self) -> f32 {
+        self.strength.clamp(0.0, 1.0)
+    }
+
+    /// The body of [`Self::displacement`]; expects a sanitized glass.
+    #[must_use]
+    fn displacement_inner(&self, x: f32) -> f32 {
+        let bezel = self.bezel.max(1e-3);
+        let h = self.profile.height(x);
+        // slope of the surface along the outward direction, in px/px
+        let d = self.profile.slope(x) * (self.thickness / bezel);
+        refract_offset(d, h * self.thickness + self.depth, self.ior)
+    }
+
+    /// The body of [`Self::cross_section`]; expects a sanitized glass.
+    #[must_use]
+    fn cross_section_inner(&self) -> CrossSection {
+        let mut samples = [0.0f32; CROSS_SECTION_SAMPLES + 1];
+        let mut max = 0.0f32;
+        for (i, s) in samples.iter_mut().enumerate() {
+            *s = self.displacement_inner(i as f32 / CROSS_SECTION_SAMPLES as f32);
+            max = max.max(s.abs());
+        }
+        CrossSection { samples, max }
+    }
+
+    /// The body of [`Self::filter_params`]; expects a sanitized glass.
+    #[must_use]
+    fn filter_params_inner(&self, max_displacement: f32) -> FilterParams {
         let s = self.strength();
         FilterParams {
             displacement_scale: 2.0 * max_displacement * self.refraction.max(0.0) * s,
             fine_sigma: self.fine_sigma.max(0.0) * s,
             wide_sigma: self.wide_sigma.max(0.0) * s,
             fine_share: self.fine_share.clamp(0.0, 1.0),
+            tint_alpha: self.tint.clamp(0.0, 1.0) * s,
         }
     }
 
     /// Displacement and specular maps for a `width × height` element.
     #[must_use]
     pub fn render(&self, width: u32, height: u32) -> GlassMaps {
-        let (w, h) = (width as usize, height as usize);
-        let mut displacement = vec![0u8; w * h * 4];
-        for px in displacement.as_chunks_mut::<4>().0 {
-            px.copy_from_slice(&NEUTRAL_DISPLACEMENT);
+        let g = self.sanitized();
+        let cs = g.cross_section_inner();
+        GlassMaps {
+            width,
+            height,
+            displacement: g.render_displacement_inner(width, height, &cs),
+            specular: g.render_specular_inner(width, height),
+            max_displacement: cs.max,
         }
-        let mut specular = vec![0u8; w * h * 4];
-        let cs = self.cross_section();
-        let s = self.strength();
-        if s == 0.0 || w == 0 || h == 0 {
-            return GlassMaps {
-                width,
-                height,
-                displacement,
-                specular,
-                max_displacement: cs.max,
+    }
+
+    /// The body of [`Self::render_displacement`]; expects a sanitized glass.
+    #[must_use]
+    fn render_displacement_inner(&self, width: u32, height: u32, cs: &CrossSection) -> Vec<u8> {
+        let mut map = NEUTRAL_DISPLACEMENT.repeat(width as usize * height as usize);
+        if self.strength() == 0.0 {
+            return map;
+        }
+        self.for_each_bevel_pixel(width, height, |i, e, xb| {
+            let idx = (xb * CROSS_SECTION_SAMPLES as f32).round() as usize;
+            let m = if cs.max > 0.0 {
+                cs.samples[idx] / cs.max
+            } else {
+                0.0
             };
+            map[i] = (128.0 + 127.0 * m * e.nx).round() as u8;
+            map[i + 1] = (128.0 + 127.0 * m * e.ny).round() as u8;
+        });
+        map
+    }
+
+    /// The body of [`Self::render_specular`]; expects a sanitized glass.
+    #[must_use]
+    fn render_specular_inner(&self, width: u32, height: u32) -> Vec<u8> {
+        let mut map = vec![0u8; width as usize * height as usize * 4];
+        let s = self.strength();
+        if s == 0.0 {
+            return map;
         }
-        let (wf, hf) = (width as f32, height as f32);
-        let r = self.radius.min(wf / 2.0).min(hf / 2.0).max(0.0);
-        let bezel = self.bezel.max(1e-3);
         let la = self.light_angle_deg.to_radians();
         let (lx, ly) = (la.cos(), la.sin());
         let f0 = self.f0();
         let norm = f0 + (1.0 - f0) * 0.03; // authored normalisation of the rim weight
-        let slope_scale = self.thickness / bezel;
+        let slope_scale = self.thickness / self.bezel.max(1e-3);
+        self.for_each_bevel_pixel(width, height, |i, e, xb| {
+            let tilt = (self.profile.slope(xb) * slope_scale).atan();
+            let facing = (e.nx * lx + e.ny * ly).max(0.0);
+            let fres = f0 + (1.0 - f0) * (1.0 - tilt.cos()).powi(5);
+            let rim = facing.powf(self.spec_exp) * tilt.sin() * (0.35 + 0.65 * fres / norm);
+            let a = (rim * self.spec_opacity * s).clamp(0.0, 1.0);
+            map[i..i + 4].copy_from_slice(&[255, 255, 255, (a * 255.0).round() as u8]);
+        });
+        map
+    }
+
+    /// The Fresnel reflection alone: white, alpha = Schlick reflectance of the tilted surface
+    /// × `reflection` × strength. Over the whole shape (the flat face reflects F0), not only the
+    /// bevel. Depends on the shape, the profile, the index and the strength; not on the key
+    /// light or colour.
+    #[must_use]
+    pub fn render_fresnel(&self, width: u32, height: u32) -> Vec<u8> {
+        let g = self.sanitized();
+        let (w, h) = (width as usize, height as usize);
+        let mut map = vec![0u8; w * h * 4];
+        let s = g.strength();
+        if s == 0.0 || w == 0 || h == 0 {
+            return map;
+        }
+        let f0 = g.f0();
+        let face = ((f0 * g.reflection.max(0.0) * s).clamp(0.0, 1.0) * 255.0).round() as u8;
+        let (wf, hf) = (width as f32, height as f32);
+        let r = g.radius.min(wf / 2.0).min(hf / 2.0).max(0.0);
+        for y in 0..h {
+            for x in 0..w {
+                let cx = x as f32 + 0.5 - wf / 2.0;
+                let cy = y as f32 + 0.5 - hf / 2.0;
+                if rounded_rect(cx, cy, wf, hf, r).is_some() {
+                    map[(y * w + x) * 4..][..4].copy_from_slice(&[255, 255, 255, face]);
+                }
+            }
+        }
+        let slope_scale = g.thickness / g.bezel.max(1e-3);
+        g.for_each_bevel_pixel(width, height, |i, _, xb| {
+            let tilt = (g.profile.slope(xb) * slope_scale).atan();
+            let fres = f0 + (1.0 - f0) * (1.0 - tilt.cos()).powi(5);
+            map[i + 3] = ((fres * g.reflection.max(0.0) * s).clamp(0.0, 1.0) * 255.0).round() as u8;
+        });
+        map
+    }
+
+    /// Visit every pixel inside the bevel band: `f(byte index, edge sample, bevel position)`.
+    fn for_each_bevel_pixel(
+        &self,
+        width: u32,
+        height: u32,
+        mut f: impl FnMut(usize, EdgeSample, f32),
+    ) {
+        let (w, h) = (width as usize, height as usize);
+        if w == 0 || h == 0 {
+            return;
+        }
+        let (wf, hf) = (width as f32, height as f32);
+        let r = self.radius.min(wf / 2.0).min(hf / 2.0).max(0.0);
+        let bezel = self.bezel.max(1e-3);
         for y in 0..h {
             for x in 0..w {
                 let cx = x as f32 + 0.5 - wf / 2.0;
@@ -230,32 +375,10 @@ impl Glass {
                     continue;
                 };
                 let xb = e.depth / bezel;
-                if xb >= 1.0 {
-                    continue;
+                if xb < 1.0 {
+                    f((y * w + x) * 4, e, xb);
                 }
-                let i = (y * w + x) * 4;
-                let idx = (xb * CROSS_SECTION_SAMPLES as f32).round() as usize;
-                let m = if cs.max > 0.0 {
-                    cs.samples[idx] / cs.max
-                } else {
-                    0.0
-                };
-                displacement[i] = (128.0 + 127.0 * m * e.nx).round() as u8;
-                displacement[i + 1] = (128.0 + 127.0 * m * e.ny).round() as u8;
-                let tilt = (self.profile.slope(xb) * slope_scale).atan();
-                let facing = (e.nx * lx + e.ny * ly).max(0.0);
-                let fres = f0 + (1.0 - f0) * (1.0 - tilt.cos()).powi(5);
-                let rim = facing.powf(self.spec_exp) * tilt.sin() * (0.35 + 0.65 * fres / norm);
-                let a = (rim * self.spec_opacity * s).clamp(0.0, 1.0);
-                specular[i..i + 4].copy_from_slice(&[255, 255, 255, (a * 255.0).round() as u8]);
             }
-        }
-        GlassMaps {
-            width,
-            height,
-            displacement,
-            specular,
-            max_displacement: cs.max,
         }
     }
 }
@@ -289,6 +412,8 @@ pub struct FilterParams {
     pub wide_sigma: f32,
     /// Weight of the fine kernel; the wide kernel gets `1 − fine_share`.
     pub fine_share: f32,
+    /// Opacity of the neutral body tint at this strength.
+    pub tint_alpha: f32,
 }
 
 /// The rendered maps of one element, RGBA8, row-major.
@@ -341,6 +466,262 @@ pub fn rounded_rect(cx: f32, cy: f32, w: f32, h: f32, r: f32) -> Option<EdgeSamp
     Some(EdgeSample { depth: -sd, nx, ny })
 }
 
+/// The shared refraction kernel. A ray perpendicular to the page meets a surface whose
+/// height rises inwards with `slope` (px of height per px inwards), refracts into a medium of
+/// index `ior` (Snell, vector form, n1 = 1) and travels `travel` px down to the background.
+/// Returns its lateral travel along the outward direction: negative on a convex surface (the
+/// ray bends inwards, which is what magnifies), zero on a flat surface. Every geometry in this
+/// module (the glass card's bevel, the droplet's cap) goes through this one function.
+#[must_use]
+pub fn refract_offset(slope: f32, travel: f32, ior: f32) -> f32 {
+    // surface normal in the (outward, z) plane
+    let nl = (slope * slope + 1.0).sqrt();
+    let (nx, nz) = (slope / nl, 1.0 / nl);
+    // incident ray (0, −1); eta = 1 / IOR, cos i = nz
+    let eta = 1.0 / ior.max(1e-3);
+    let cosi = nz;
+    let k = 1.0 - eta * eta * (1.0 - cosi * cosi);
+    if k < 0.0 {
+        return 0.0;
+    }
+    let m = eta * cosi - k.sqrt();
+    let tx = m * nx;
+    let tz = -eta + m * nz;
+    tx / tz.abs() * travel
+}
+
+/// A transparent medium: its refractive index at the d line (587.6 nm) and its Abbe number,
+/// which together fix the index at every wavelength (Cauchy, `n(λ) = A + B/λ²`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Medium {
+    /// Index at 587.6 nm.
+    pub ior: f32,
+    /// Abbe number `V = (n_d − 1)/(n_F − n_C)`; `None` is a medium without dispersion.
+    pub abbe: Option<f32>,
+}
+
+impl Medium {
+    /// Water at 20 °C: n_d 1.333, V 55.7 (literature values, not measured by us).
+    pub const WATER: Self = Self {
+        ior: 1.333,
+        abbe: Some(55.7),
+    };
+    /// Crown glass (BK7): n_d 1.5168, V 64.17 (manufacturer data sheet values).
+    pub const CROWN_GLASS: Self = Self {
+        ior: 1.5168,
+        abbe: Some(64.17),
+    };
+    /// Diamond: n_d 2.417, V 55.3 (literature values, not measured by us).
+    pub const DIAMOND: Self = Self {
+        ior: 2.417,
+        abbe: Some(55.3),
+    };
+
+    /// The indices for red, green and blue, taken at the lines the Abbe number is defined on
+    /// (C 656.3 nm, d 587.6 nm, F 486.1 nm), so green is exactly `ior` and
+    /// `n_B − n_R = (ior − 1)/V`. `exaggeration` multiplies the spread; 1 is physical.
+    /// Without an Abbe number (or with a non-finite or non-positive one) all three equal `ior`.
+    #[must_use]
+    pub fn channel_iors(&self, exaggeration: f32) -> [f32; 3] {
+        let n = self.ior;
+        let Some(v) = self.abbe.filter(|v| v.is_finite() && *v > 0.0) else {
+            return [n; 3];
+        };
+        let e = if exaggeration.is_finite() {
+            exaggeration.max(0.0)
+        } else {
+            1.0
+        };
+        let (c, d, f) = (0.6563f32, 0.5876f32, 0.4861f32); // µm
+        let dn = (n - 1.0) / v * e;
+        let b = dn / (1.0 / (f * f) - 1.0 / (c * c));
+        let a = n - b / (d * d);
+        [a + b / (c * c), n, a + b / (f * f)]
+    }
+}
+
+/// A droplet resting on the page: a spherical cap with circular footprint `radius` (px) and
+/// apex `height` (px). Rays refract at the curved top and travel through the drop to the
+/// page, which is what magnifies the text under it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Droplet {
+    /// Footprint radius in px.
+    pub radius: f32,
+    /// Apex height in px, `(0, radius]`; `radius` is a hemisphere.
+    pub height: f32,
+}
+
+impl Droplet {
+    /// The radius of the sphere the cap is cut from.
+    #[must_use]
+    pub fn sphere_radius(&self) -> f32 {
+        let (a, h) = (
+            self.radius.max(1e-3),
+            self.height.clamp(1e-3, self.radius.max(1e-3)),
+        );
+        (a * a + h * h) / (2.0 * h)
+    }
+
+    /// Height of the surface over the page and its slope (rising inwards) at distance `r`
+    /// from the centre; `None` outside the footprint.
+    #[must_use]
+    pub fn surface(&self, r: f32) -> Option<(f32, f32)> {
+        let a = self.radius.max(1e-3);
+        if !(0.0..a).contains(&r) {
+            return None;
+        }
+        let rs = self.sphere_radius();
+        let h = self.height.clamp(1e-3, a);
+        let root = (rs * rs - r * r).max(1e-6).sqrt();
+        Some((root - (rs - h), r / root))
+    }
+
+    /// The magnification at the centre: the sampling point is pulled in by a fixed fraction
+    /// near the axis, `r' = r (1 − k)`, so the text appears `1 / (1 − k)` times larger.
+    #[must_use]
+    pub fn centre_magnification(&self, ior: f32) -> f32 {
+        let r1 = self.radius.max(1e-3) / CROSS_SECTION_SAMPLES as f32;
+        let s1 = self.cross_section(ior).samples[1];
+        1.0 / (1.0 + s1 / r1)
+    }
+
+    /// The radial cross-section of the displacement for one medium index, `r = i/N · radius`.
+    #[must_use]
+    pub fn cross_section(&self, ior: f32) -> CrossSection {
+        let mut samples = [0.0f32; CROSS_SECTION_SAMPLES + 1];
+        let mut max = 0.0f32;
+        for (i, s) in samples.iter_mut().enumerate() {
+            let r = i as f32 / CROSS_SECTION_SAMPLES as f32 * self.radius;
+            *s = self
+                .surface(r)
+                .map_or(0.0, |(h, slope)| refract_offset(slope, h, ior));
+            max = max.max(s.abs());
+        }
+        CrossSection { samples, max }
+    }
+
+    /// The droplet's maps in a square of side `2·radius + 2` px, centred: the displacement
+    /// map (green-channel index, normalized like the glass map), a specular map (Blinn-Phong
+    /// highlight of the key light, Schlick-weighted) and a rim map (black, alpha = Fresnel
+    /// reflectance: the edge transmits less of the page). Per-channel filter scales come
+    /// from [`Medium::channel_iors`].
+    #[must_use]
+    pub fn render(&self, medium: Medium, light: KeyLight, dispersion: f32) -> DropletMaps {
+        let side = (2.0 * self.radius.max(1.0)).ceil() as u32 + 2;
+        let n = side as usize;
+        let [nr, ng, nb] = medium.channel_iors(dispersion);
+        let cs = self.cross_section(ng);
+        let maxes = [
+            self.cross_section(nr).max,
+            cs.max,
+            self.cross_section(nb).max,
+        ];
+        let mut displacement = NEUTRAL_DISPLACEMENT.repeat(n * n);
+        let mut specular = vec![0u8; n * n * 4];
+        let mut rim = vec![0u8; n * n * 4];
+        let c = side as f32 / 2.0;
+        let f0 = ((ng - 1.0) / (ng + 1.0)).powi(2);
+        let (la, el) = (
+            light.angle_deg.to_radians(),
+            light.elevation_deg.to_radians(),
+        );
+        let l = [la.cos() * el.cos(), la.sin() * el.cos(), el.sin()];
+        let hv = {
+            let v = [l[0], l[1], l[2] + 1.0];
+            let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+            [v[0] / len, v[1] / len, v[2] / len]
+        };
+        for y in 0..n {
+            for x in 0..n {
+                let (dx, dy) = (x as f32 + 0.5 - c, y as f32 + 0.5 - c);
+                let r = (dx * dx + dy * dy).sqrt();
+                let Some((_, slope)) = self.surface(r) else {
+                    continue;
+                };
+                let (ox, oy) = if r > 0.0 {
+                    (dx / r, dy / r)
+                } else {
+                    (0.0, 0.0)
+                };
+                let i = (y * n + x) * 4;
+                let idx = ((r / self.radius) * CROSS_SECTION_SAMPLES as f32).round() as usize;
+                let m = if cs.max > 0.0 {
+                    cs.samples[idx.min(CROSS_SECTION_SAMPLES)] / cs.max
+                } else {
+                    0.0
+                };
+                displacement[i] = (128.0 + 127.0 * m * ox).round() as u8;
+                displacement[i + 1] = (128.0 + 127.0 * m * oy).round() as u8;
+                // 3-D surface normal: tilted outwards by the slope
+                let nl = (slope * slope + 1.0).sqrt();
+                let nrm = [ox * slope / nl, oy * slope / nl, 1.0 / nl];
+                let cos_v = nrm[2];
+                let fres = f0 + (1.0 - f0) * (1.0 - cos_v).powi(5);
+                let nh = (nrm[0] * hv[0] + nrm[1] * hv[1] + nrm[2] * hv[2]).max(0.0);
+                let spec = (nh.powf(light.shininess)
+                    * (0.25 + 0.75 * fres / f0.max(1e-3)).min(4.0)
+                    * light.intensity)
+                    .clamp(0.0, 1.0);
+                specular[i..i + 4].copy_from_slice(&[255, 255, 255, (spec * 255.0).round() as u8]);
+                rim[i + 3] = (fres.clamp(0.0, 1.0) * light.rim * 255.0).round() as u8;
+            }
+        }
+        let scales = maxes.map(|mx| 2.0 * mx);
+        DropletMaps {
+            side,
+            displacement,
+            specular,
+            rim,
+            channel_scales: scales,
+        }
+    }
+}
+
+/// The key light for surface highlights: direction in the page plane (screen space, y down),
+/// elevation above the page, Blinn-Phong shininess, highlight intensity and rim strength.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct KeyLight {
+    /// Azimuth in degrees, screen space.
+    pub angle_deg: f32,
+    /// Elevation above the page in degrees.
+    pub elevation_deg: f32,
+    /// Blinn-Phong exponent.
+    pub shininess: f32,
+    /// Peak highlight opacity.
+    pub intensity: f32,
+    /// Opacity of the Fresnel rim at grazing angles.
+    pub rim: f32,
+}
+
+impl KeyLight {
+    /// Light from the upper left, 55° above the page (authored).
+    pub const DEFAULT: Self = Self {
+        angle_deg: -135.0,
+        elevation_deg: 55.0,
+        shininess: 120.0,
+        intensity: 0.9,
+        rim: 0.35,
+    };
+}
+
+/// The rendered maps of a droplet, RGBA8, a `side × side` square centred on the drop.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DropletMaps {
+    /// Edge of the square in px.
+    pub side: u32,
+    /// Displacement for the green index, normalized like the glass map.
+    pub displacement: Vec<u8>,
+    /// Specular highlight, white with the intensity in alpha.
+    pub specular: Vec<u8>,
+    /// Fresnel rim, black with the reflectance in alpha.
+    pub rim: Vec<u8>,
+    /// `feDisplacementMap` scale per channel (R, G, B): the same map scaled per wavelength.
+    pub channel_scales: [f32; 3],
+}
+
+/// The smallest rear-light box edge (px) that is drawn; smaller boxes stay transparent.
+pub const REAR_MIN_EDGE: usize = 32;
+
 /// The coloured light behind an active surface. The only place colour enters the material.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RearLight {
@@ -359,10 +740,17 @@ pub struct RearLight {
 pub fn rear_field(width: u32, height: u32, light: RearLight, strength: f32) -> Vec<u8> {
     let (w, h) = (width as usize, height as usize);
     let mut out = vec![0u8; w * h * 4];
-    let s = strength.clamp(0.0, 1.0) * light.halo.clamp(0.0, 1.0);
-    if s == 0.0 || w < 3 || h < 3 {
+    let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+    let s = finite(strength).clamp(0.0, 1.0) * finite(light.halo).clamp(0.0, 1.0);
+    // Below this size the field cannot fade to zero without a visible step, so it is not drawn.
+    if s == 0.0 || w < REAR_MIN_EDGE || h < REAR_MIN_EDGE {
         return out;
     }
+    let light = RearLight {
+        hue: finite(light.hue),
+        sat: finite(light.sat),
+        halo: light.halo,
+    };
     let sat = light.sat.clamp(0.0, 1.0);
     let rgb = hsl(light.hue, sat, 0.62 + (1.0 - sat) * 0.32);
     // authored: the light sits behind the lower left, a wide soft lobe
@@ -400,9 +788,13 @@ pub fn hsl(h: f32, s: f32, l: f32) -> [u8; 3] {
     [f(0.0), f(8.0), f(4.0)].map(|c| (c * 255.0).round().clamp(0.0, 255.0) as u8)
 }
 
+/// The error of [`png_rgba`].
+#[cfg(feature = "optics-png")]
+pub type PngError = png::EncodingError;
+
 /// Encode an RGBA8 buffer as PNG.
 #[cfg(feature = "optics-png")]
-pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, png::EncodingError> {
+pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, PngError> {
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, width, height);
@@ -536,8 +928,13 @@ mod tests {
         }
         .filter_params(off.max_displacement);
         assert_eq!(
-            (p.displacement_scale, p.fine_sigma, p.wide_sigma),
-            (0.0, 0.0, 0.0)
+            (
+                p.displacement_scale,
+                p.fine_sigma,
+                p.wide_sigma,
+                p.tint_alpha
+            ),
+            (0.0, 0.0, 0.0, 0.0)
         );
         let light = RearLight {
             hue: 352.0,
@@ -597,43 +994,324 @@ mod tests {
     }
 
     /// G5: the rear field ends inside its own box: every border pixel is transparent, the
-    /// field is visible inside, and it fades without a step.
+    /// field is visible inside, and it fades without a step in either direction. Checked at
+    /// the smallest drawn size and at the sizes the lab uses (a control's rear box is about
+    /// 200 px, a panel's about 1600 px).
     #[test]
     fn the_rear_field_has_no_silhouette() {
-        let (w, h) = (300usize, 180usize);
-        let f = rear_field(
-            w as u32,
-            h as u32,
+        let light = RearLight {
+            hue: 212.0,
+            sat: 0.8,
+            halo: 1.0,
+        };
+        for (w, h) in [
+            (REAR_MIN_EDGE, REAR_MIN_EDGE),
+            (202, 186),
+            (300, 180),
+            (740, 520),
+            (1600, 1300),
+        ] {
+            let f = rear_field(w as u32, h as u32, light, 1.0);
+            let a = |x: usize, y: usize| f[(y * w + x) * 4 + 3];
+            for x in 0..w {
+                assert_eq!(
+                    (a(x, 0), a(x, h - 1)),
+                    (0, 0),
+                    "{w}x{h}: top/bottom border at x = {x}"
+                );
+            }
+            for y in 0..h {
+                assert_eq!(
+                    (a(0, y), a(w - 1, y)),
+                    (0, 0),
+                    "{w}x{h}: left/right border at y = {y}"
+                );
+            }
+            assert!(
+                a(w * 3 / 10, h * 7 / 10) > 60,
+                "{w}x{h}: the field is visible inside"
+            );
+            if w.min(h) < 150 {
+                continue; // a box this small cannot fade within 8 levels per pixel
+            }
+            let mut max_step = 0;
+            for y in 0..h {
+                for x in 0..w {
+                    if x > 0 {
+                        max_step = max_step.max(a(x, y).abs_diff(a(x - 1, y)));
+                    }
+                    if y > 0 {
+                        max_step = max_step.max(a(x, y).abs_diff(a(x, y - 1)));
+                    }
+                }
+            }
+            assert!(max_step <= 8, "{w}x{h}: largest step {max_step}");
+        }
+        // below the minimum the field is not drawn at all, rather than drawn with an edge
+        assert!(rear_field(31, 200, light, 1.0).iter().all(|&b| b == 0));
+    }
+
+    /// G3 continuity: every term scales with strength, so a strength just above 0 is still
+    /// (within one 8-bit step) the neutral baseline. This catches a term that ignores
+    /// strength, which the strength-0 test alone cannot see behind its early return.
+    #[test]
+    fn a_tiny_strength_stays_within_one_step_of_neutral() {
+        let (w, h) = (240u32, 140u32);
+        let g = Glass {
+            strength: 1e-3,
+            ..Glass::DEFAULT
+        };
+        let spec = g.render_specular(w, h);
+        assert!(
+            spec.as_chunks::<4>().0.iter().all(|p| p[3] <= 1),
+            "rim ignores strength"
+        );
+        let rear = rear_field(
+            w + 200,
+            h + 200,
             RearLight {
-                hue: 212.0,
-                sat: 0.8,
+                hue: 352.0,
+                sat: 0.75,
                 halo: 1.0,
             },
-            1.0,
+            1e-3,
         );
-        let a = |x: usize, y: usize| f[(y * w + x) * 4 + 3];
-        for x in 0..w {
-            assert_eq!(
-                (a(x, 0), a(x, h - 1)),
-                (0, 0),
-                "top/bottom border at x = {x}"
-            );
+        assert!(
+            rear.as_chunks::<4>().0.iter().all(|p| p[3] <= 1),
+            "rear ignores strength"
+        );
+        let p = g.filter_params(g.cross_section().max);
+        assert!(
+            p.displacement_scale < 0.1 && p.wide_sigma < 0.05 && p.tint_alpha < 0.001,
+            "{p:?}"
+        );
+        // and the same check fails at full strength
+        let full = Glass::DEFAULT.render_specular(w, h);
+        assert!(full.as_chunks::<4>().0.iter().any(|p| p[3] > 1));
+    }
+
+    /// Non-finite inputs never reach the maps: they take the default's value, and a NaN
+    /// strength is no effect.
+    #[test]
+    fn non_finite_values_never_reach_the_maps() {
+        let bad = Glass {
+            thickness: f32::NAN,
+            ior: f32::INFINITY,
+            ..Glass::DEFAULT
+        };
+        assert_eq!(bad.render(80, 60), Glass::DEFAULT.render(80, 60));
+        let nan_strength = Glass {
+            strength: f32::NAN,
+            ..Glass::DEFAULT
+        };
+        assert_eq!(
+            nan_strength.render(80, 60),
+            Glass {
+                strength: 0.0,
+                ..Glass::DEFAULT
+            }
+            .render(80, 60)
+        );
+        let light = RearLight {
+            hue: f32::NAN,
+            sat: f32::NAN,
+            halo: f32::NAN,
+        };
+        assert!(rear_field(100, 100, light, 1.0).iter().all(|&b| b == 0));
+    }
+
+    /// The Fresnel reflection covers the whole shape at F0 and rises on the bevel; it does
+    /// not move with the key light (unlike the rim) and is empty at strength 0.
+    #[test]
+    fn fresnel_reflection_is_f0_on_the_face_and_rises_on_the_bevel() {
+        let (w, h) = (200usize, 120usize);
+        let m = Glass::DEFAULT.render_fresnel(w as u32, h as u32);
+        let a = |x: usize, y: usize| m[(y * w + x) * 4 + 3];
+        assert_eq!(
+            a(100, 60),
+            (0.04f32 * 255.0).round() as u8,
+            "flat face reflects F0"
+        );
+        assert!(
+            a(100, 1) > a(100, 60),
+            "bevel {} vs face {}",
+            a(100, 1),
+            a(100, 60)
+        );
+        // not directional: the top, bottom, left and right edges reflect alike
+        assert_eq!(a(100, 1), a(100, h - 2));
+        assert_eq!(a(1, 60), a(w - 2, 60));
+        // a steeper bevel reflects more at the edge
+        let steep = Glass {
+            thickness: 60.0,
+            ..Glass::DEFAULT
         }
-        for y in 0..h {
-            assert_eq!(
-                (a(0, y), a(w - 1, y)),
-                (0, 0),
-                "left/right border at y = {y}"
-            );
+        .render_fresnel(w as u32, h as u32);
+        assert!(
+            steep[(w + 100) * 4 + 3] > a(100, 1),
+            "steep bevel must reflect more"
+        );
+        assert_eq!(a(0, 0), 0, "outside the shape");
+        let turned = Glass {
+            light_angle_deg: 70.0,
+            ..Glass::DEFAULT
         }
-        assert!(a(w / 3, h * 2 / 3) > 100, "the field is visible inside");
-        // no step: neighbouring pixels never jump by more than a few levels
-        let max_step = (0..h)
-            .flat_map(|y| (1..w).map(move |x| (y, x)))
-            .map(|(y, x)| a(x, y).abs_diff(a(x - 1, y)))
-            .max()
-            .unwrap();
-        assert!(max_step <= 8, "largest horizontal step {max_step}");
+        .render_fresnel(w as u32, h as u32);
+        assert_eq!(m, turned, "the key light does not move the Fresnel term");
+        assert!(
+            Glass {
+                strength: 0.0,
+                ..Glass::DEFAULT
+            }
+            .render_fresnel(80, 60)
+            .iter()
+            .all(|&b| b == 0)
+        );
+    }
+
+    const DROP: Droplet = Droplet {
+        radius: 60.0,
+        height: 18.0,
+    };
+
+    /// The droplet magnifies: the map samples inwards, by an amount that is zero at the
+    /// centre and at the contact line and largest in between.
+    #[test]
+    fn a_droplet_refracts_inwards_and_vanishes_at_centre_and_rim() {
+        let cs = DROP.cross_section(Medium::WATER.ior);
+        assert_eq!(cs.samples[0], 0.0, "no offset at the centre");
+        assert!(
+            cs.samples[CROSS_SECTION_SAMPLES].abs() < 1e-3,
+            "outside the footprint"
+        );
+        let inner = &cs.samples[1..CROSS_SECTION_SAMPLES];
+        assert!(inner.iter().all(|&v| v < 0.0), "every sample bends inwards");
+        let peak = inner.iter().cloned().fold(0.0f32, f32::min);
+        assert!(
+            peak < -1.0 && (inner[0] > peak) && (inner[inner.len() - 1] > peak),
+            "peak {peak}"
+        );
+    }
+
+    /// Near the centre the sampling point is pulled in proportionally, which is a
+    /// magnification `1 / (1 − k)` > 1; a taller drop magnifies more, a flat one not at all.
+    #[test]
+    fn a_taller_drop_magnifies_more() {
+        let mag = |d: Droplet| d.centre_magnification(Medium::WATER.ior);
+        let flat = mag(Droplet {
+            radius: 60.0,
+            height: 0.5,
+        });
+        let low = mag(Droplet {
+            radius: 60.0,
+            height: 12.0,
+        });
+        let high = mag(Droplet {
+            radius: 60.0,
+            height: 30.0,
+        });
+        assert!((flat - 1.0).abs() < 0.01, "flat {flat}");
+        assert!(1.0 < low && low < high, "low {low} high {high}");
+    }
+
+    /// Textbook check of the whole chain: an object at the flat face of a hemispherical lens,
+    /// viewed along the axis, is magnified by exactly the refractive index.
+    #[test]
+    fn a_hemisphere_magnifies_by_the_refractive_index() {
+        let hemi = Droplet {
+            radius: 90.0,
+            height: 90.0,
+        };
+        for m in [Medium::WATER, Medium::CROWN_GLASS, Medium::DIAMOND] {
+            let mag = hemi.centre_magnification(m.ior);
+            assert!((mag / m.ior - 1.0).abs() < 0.01, "n {} gives ×{mag}", m.ior);
+        }
+    }
+
+    #[test]
+    fn denser_media_refract_more() {
+        let max = |m: Medium| DROP.cross_section(m.ior).max;
+        assert!(max(Medium::WATER) < max(Medium::CROWN_GLASS));
+        assert!(max(Medium::CROWN_GLASS) < max(Medium::DIAMOND));
+    }
+
+    /// Dispersion follows the Abbe number: red < green < blue, green is the d-line index,
+    /// the spread is (n − 1)/V, exaggeration scales it, and no Abbe number means none.
+    #[test]
+    fn channel_indices_follow_the_abbe_number() {
+        let [r, g, b] = Medium::CROWN_GLASS.channel_iors(1.0);
+        assert_eq!(g, Medium::CROWN_GLASS.ior);
+        assert!(r < g && g < b);
+        assert!(((b - r) - (1.5168 - 1.0) / 64.17).abs() < 1e-5, "{}", b - r);
+        let [r2, _, b2] = Medium::CROWN_GLASS.channel_iors(2.0);
+        assert!(((b2 - r2) / (b - r) - 2.0).abs() < 1e-3);
+        let plain = Medium {
+            ior: 1.5,
+            abbe: None,
+        };
+        assert_eq!(plain.channel_iors(5.0), [1.5; 3]);
+        assert_eq!(
+            Medium {
+                abbe: Some(f32::NAN),
+                ..plain
+            }
+            .channel_iors(1.0),
+            [1.5; 3]
+        );
+        assert_eq!(Medium::WATER.channel_iors(0.0), [Medium::WATER.ior; 3]);
+    }
+
+    /// The per-channel filter scales are ordered by wavelength, and equal without dispersion.
+    #[test]
+    fn droplet_channel_scales_split_only_with_dispersion() {
+        let m = DROP.render(Medium::WATER, KeyLight::DEFAULT, 1.0);
+        let [r, g, b] = m.channel_scales;
+        assert!(r < g && g < b, "{:?}", m.channel_scales);
+        let none = DROP.render(Medium::WATER, KeyLight::DEFAULT, 0.0);
+        assert_eq!(none.channel_scales, [none.channel_scales[1]; 3]);
+        assert_eq!(
+            m.displacement, none.displacement,
+            "the map is the green index in both"
+        );
+    }
+
+    /// The highlight sits on the side facing the key light; the Fresnel rim is strongest
+    /// at the contact line.
+    #[test]
+    fn the_highlight_faces_the_light_and_the_rim_is_at_the_edge() {
+        let m = DROP.render(Medium::WATER, KeyLight::DEFAULT, 0.0);
+        let n = m.side as usize;
+        let a = |buf: &[u8], x: usize, y: usize| buf[(y * n + x) * 4 + 3];
+        let (mut best, mut at) = (0u8, (0, 0));
+        for y in 0..n {
+            for x in 0..n {
+                if a(&m.specular, x, y) > best {
+                    best = a(&m.specular, x, y);
+                    at = (x, y);
+                }
+            }
+        }
+        assert!(best > 100, "highlight {best}");
+        assert!(
+            at.0 < n / 2 && at.1 < n / 2,
+            "light from the upper left, highlight at {at:?}"
+        );
+        assert_eq!(a(&m.rim, 0, 0), 0, "outside the drop");
+        // Fresnel reflectance grows with the tilt: on a steep drop the rim rises at the
+        // contact line, on a flat one it stays near F0 everywhere
+        let tall = Droplet {
+            radius: 60.0,
+            height: 55.0,
+        }
+        .render(Medium::WATER, KeyLight::DEFAULT, 0.0);
+        let t = tall.side as usize;
+        let ra = |x: usize| tall.rim[((t / 2) * t + x) * 4 + 3];
+        assert!(
+            ra(t / 2 + 58) > 2 * ra(t / 2 + 20),
+            "rim {} vs {}",
+            ra(t / 2 + 58),
+            ra(t / 2 + 20)
+        );
     }
 
     #[test]

@@ -53,3 +53,8 @@ required-features = ["raster"]
 [[example]]
 name = "patient"
 required-features = ["raster"]
+
+# Release-mode cost of the optical engine, stage by stage (needs PNG encoding).
+[[example]]
+name = "optics_timing"
+required-features = ["optics-png"]
