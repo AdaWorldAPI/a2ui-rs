@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optical surfaces · Material Laboratory · a2ui</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:#f7f4ec;color:#1c1a17;overflow:hidden;font:16px/1.45 Georgia,"Times New Roman",serif}
+#page{position:absolute;inset:0;width:100%;height:100%}
+#gl,#svgsurf{position:absolute;left:0;top:0;touch-action:none;cursor:grab;will-change:transform}
+#svgsurf{-webkit-backdrop-filter:url(#surf);backdrop-filter:url(#surf);overflow:hidden}
+#svgsurf .layer{position:absolute;inset:0;background-size:100% 100%;pointer-events:none}
+.drag{cursor:grabbing!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+#panel{position:fixed;top:12px;right:12px;width:330px;padding:10px 14px;background:rgba(255,255,255,.95);
+  border:1px solid #d9d4c7;border-radius:10px;font:12.5px/1.35 ui-sans-serif,system-ui,sans-serif;max-height:calc(100% - 24px);overflow:auto}
+#panel h1{font-size:15px;margin:0 0 4px}
+#panel h2{font-size:12px;margin:10px 0 2px;text-transform:uppercase;letter-spacing:.04em;color:#666}
+#panel p{margin:0 0 6px;color:#555}
+#panel label{display:block;margin:3px 0}
+#panel label span{display:flex;justify-content:space-between}
+#panel input[type=range],#panel select{width:100%}
+#panel .row{display:flex;flex-wrap:wrap;gap:4px 10px}
+#readout{font:11.5px ui-monospace,monospace;white-space:pre-wrap;color:#333;word-break:break-all}
+@media (max-width:600px){#panel{top:auto;bottom:8px;left:8px;right:8px;width:auto;max-height:40%}}
+</style>
+<body>
+<canvas id="page" aria-hidden="true"></canvas>
+<canvas id="gl" aria-hidden="true" hidden></canvas>
+<div id="svgsurf" hidden><div class="layer" id="rimL"></div><div class="layer" id="specL"></div></div>
+<div id="text" class="sr"></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<filter id="surf" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+<feImage id="map" x="0" y="0" preserveAspectRatio="none" result="map"/>
+<feDisplacementMap id="dr" in="SourceGraphic" in2="map" xChannelSelector="R" yChannelSelector="G" result="r0"/>
+<feDisplacementMap id="dg" in="SourceGraphic" in2="map" xChannelSelector="R" yChannelSelector="G" result="g0"/>
+<feDisplacementMap id="db" in="SourceGraphic" in2="map" xChannelSelector="R" yChannelSelector="G" result="b0"/>
+<feColorMatrix in="r0" type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="r"/>
+<feColorMatrix in="g0" type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="g"/>
+<feColorMatrix in="b0" type="matrix" values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="b"/>
+<feBlend in="r" in2="g" mode="screen" result="rg"/>
+<feBlend in="rg" in2="b" mode="screen" result="direct"/>
+<feGaussianBlur id="fineB" in="direct" stdDeviation="0" result="fine"/>
+<feGaussianBlur id="wideB" in="direct" stdDeviation="0" result="wide"/>
+<feComposite id="mixDF" in="direct" in2="fine" operator="arithmetic" k1="0" k2="1" k3="0" k4="0" result="df"/>
+<feComposite id="mixW" in="df" in2="wide" operator="arithmetic" k1="0" k2="1" k3="0" k4="0"/>
+</filter></defs></svg>
+<form id="panel" onsubmit="return false">
+<h1>Optical surfaces</h1>
+<p id="support">Loading…</p>
+<p>One specification (<code>a2ui_paint::optics::surface</code>), two backends: SVG filters over CPU maps, or the WebGL2 shader. Presets are parameter sets; every control is independent.</p>
+<div class="row" id="presets"></div>
+<label><span>Backend</span><select id="backend"><option value="gl">WebGL2 (wasm shader)</option><option value="svg">SVG filter over CPU maps (Chromium)</option></select></label>
+<h2>Footprint</h2>
+<label><span>Shorter side px <output data-for="size"></output></span><input data-q="size" type="range" min="20" max="500" step="1"></label>
+<label><span>Aspect (w / h) <output data-for="aspect"></output></span><input data-q="aspect" type="range" min="0.25" max="5" step="0.05"></label>
+<label><span>Corner (of half the shorter side) <output data-for="corner"></output></span><input data-q="corner" type="range" min="0" max="1" step="0.01"></label>
+<h2>Relief</h2>
+<label><span>Height px <output data-for="height"></output></span><input data-q="height" type="range" min="0" max="200" step="0.5"></label>
+<label><span>Face curvature <output data-for="face"></output></span><input data-q="face" type="range" min="0" max="1" step="0.01"></label>
+<label><span>Shoulder width px <output data-for="shoulder"></output></span><input data-q="shoulder" type="range" min="0" max="120" step="0.5"></label>
+<label><span>Shoulder profile (1 chamfer · 2 circle · 4 squircle) <output data-for="profile"></output></span><input data-q="profile" type="range" min="1" max="8" step="0.1"></label>
+<label><span>Base slab px <output data-for="base"></output></span><input data-q="base" type="range" min="0" max="60" step="0.5"></label>
+<h2>Material</h2>
+<label><span>Refractive index <output data-for="ior"></output></span><input data-q="ior" type="range" min="1" max="2.5" step="0.001"></label>
+<label><span>Abbe number <output data-for="abbe"></output></span><input data-q="abbe" type="range" min="10" max="100" step="0.1"></label>
+<label><span>Dispersion × <output data-for="disp"></output></span><input data-q="disp" type="range" min="0" max="30" step="0.5"></label>
+<h2>Transmission (normalized weights)</h2>
+<label><span>Direct <output data-for="direct"></output></span><input data-q="direct" type="range" min="0" max="1" step="0.01"></label>
+<label><span>Fine scatter <output data-for="fine"></output></span><input data-q="fine" type="range" min="0" max="1" step="0.01"></label>
+<label><span>Wide scatter <output data-for="wide"></output></span><input data-q="wide" type="range" min="0" max="1" step="0.01"></label>
+<label><span>Fine σ px <output data-for="fsig"></output></span><input data-q="fsig" type="range" min="0" max="8" step="0.025"></label>
+<label><span>Wide σ px <output data-for="wsig"></output></span><input data-q="wsig" type="range" min="0" max="40" step="0.5"></label>
+<label><span>Tint <output data-for="tint"></output></span><input data-q="tint" type="color"></label>
+<label><span>Tint opacity <output data-for="tinta"></output></span><input data-q="tinta" type="range" min="0" max="1" step="0.01"></label>
+<h2>Illumination</h2>
+<label><span>Key-light azimuth <output data-for="light"></output></span><input data-q="light" type="range" min="-180" max="180" step="1"></label>
+<label><span>Elevation <output data-for="elev"></output></span><input data-q="elev" type="range" min="1" max="90" step="1"></label>
+<label><span>Shininess <output data-for="shine"></output></span><input data-q="shine" type="range" min="1" max="400" step="1"></label>
+<label><span>Highlight <output data-for="spec"></output></span><input data-q="spec" type="range" min="0" max="1" step="0.01"></label>
+<label><span>Fresnel rim <output data-for="rim"></output></span><input data-q="rim" type="range" min="0" max="1" step="0.01"></label>
+<div class="row">
+<label><input type="checkbox" data-term="refraction" checked> refraction</label>
+<label><input type="checkbox" data-term="rim" checked> rim</label>
+<label><input type="checkbox" data-term="spec" checked> highlight</label>
+</div>
+<div class="row"><button type="button" id="bench">Measure 120 moving frames</button><button type="button" id="parity">GPU vs CPU parity</button><button type="button" id="idle">Idle check (1 s)</button></div>
+<p id="readout"></p>
+</form>
+<script type="module">
+const $ = (s) => document.querySelector(s);
+const PRESETS = [['droplet', 'Droplet'], ['capsule', 'Capsule'], ['clear-card', 'Clear card'], ['frosted-card', 'Frosted card'], ['aqua', 'Aqua']];
+const pageEl = $('#page'), glEl = $('#gl'), svgEl = $('#svgsurf');
+const stats = {};
+const show = () => { $('#readout').textContent = Object.entries(stats).map(([k, v]) => k + ': ' + v).join('\n'); };
+const fmt = (ms) => ms.toFixed(2) + ' ms';
+const params = new URLSearchParams(location.search);
+let preset = params.get('preset') || 'droplet';
+$('#backend').value = params.get('backend') || 'gl';
+
+const para = 'Light does not merely pass through a drop of water. The curved surface bends every ray toward ' +
+  'the centre, so the letters under the drop arrive from a smaller patch of the page and appear larger; ' +
+  'near the contact line the surface is steep, the letters stretch and bend, and the rim reflects more ' +
+  'of the room than it transmits. Move the surface and watch the same lens slide over new words. ';
+$('#text').textContent = para;
+function drawPage(c, w, h, dpr) {
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f7f4ec'; g.fillRect(0, 0, w, h);
+  g.fillStyle = '#1c1a17'; g.font = (16 * dpr) + 'px Georgia, "Times New Roman", serif'; g.textBaseline = 'top';
+  const pad = 20 * dpr, gap = 28 * dpr, lh = 23 * dpr;
+  const cols = Math.max(1, Math.floor((w - 2 * pad + gap) / (268 * dpr)));
+  const cw = (w - 2 * pad - (cols - 1) * gap) / cols;
+  const words = para.split(' ').filter(Boolean);
+  let i = 0;
+  for (let col = 0; col < cols; col++) {
+    const x = pad + col * (cw + gap);
+    for (let y = pad; y + lh < h; y += lh) {
+      let line = '';
+      for (;;) {
+        const next = line ? line + ' ' + words[i % words.length] : words[i % words.length];
+        if (line && g.measureText(next).width > cw) break;
+        line = next; i++;
+      }
+      g.fillText(line, x, y);
+    }
+  }
+}
+
+// controls <-> the shared query contract (Surface::from_query / to_query)
+const inputs = [...document.querySelectorAll('[data-q]')];
+const term = (t) => document.querySelector('[data-term="' + t + '"]').checked;
+function query() {
+  return 'preset=' + preset + '&' + inputs.map((el) => el.dataset.q + '=' + encodeURIComponent(el.type === 'color' ? el.value.slice(1) : el.value)).join('&');
+}
+function outputs() { inputs.forEach((el) => { const o = document.querySelector('[data-for="' + el.dataset.q + '"]'); if (o) o.textContent = el.value; }); }
+async function loadPreset(name) {
+  preset = name;
+  const q = await (await fetch('/lab/optics/surface/params?preset=' + name)).text();
+  new URLSearchParams(q).forEach((v, k) => {
+    const el = document.querySelector('[data-q="' + k + '"]');
+    if (el) el.value = el.type === 'color' ? '#' + v : v;
+  });
+  document.querySelectorAll('#presets button').forEach((b) => { b.style.fontWeight = b.dataset.p === name ? '700' : '400'; });
+  update();
+}
+PRESETS.forEach(([k, label]) => {
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.dataset.p = k;
+  b.onclick = () => loadPreset(k); $('#presets').appendChild(b);
+});
+
+let dpr = 1, center = [0, 0], r = null, pending = 0, frames = [], mapFetches = 0;
+const backend = () => $('#backend').value;
+const el = () => backend() === 'gl' ? glEl : svgEl;
+
+// ---- WebGL2 backend ----
+function glFrame() {
+  pending = 0;
+  const ms = r.render(true);
+  frames.push(ms); if (frames.length > 60) frames.shift();
+  const s = frames.slice().sort((a, b) => a - b);
+  stats['frame (GPU-synced)'] = fmt(ms) + ', median of last ' + s.length + ' ' + fmt(s[s.length >> 1]);
+  show();
+}
+function glPlace() {
+  r.set_center(center[0], center[1]);
+  glEl.style.transform = 'translate(' + r.origin_x() / dpr + 'px,' + r.origin_y() / dpr + 'px)';
+  if (!pending) pending = requestAnimationFrame(glFrame);
+}
+function glUpdate() {
+  r.set_params(query(), dpr);
+  r.set_terms(term('refraction'), term('rim'), term('spec'));
+  const w = r.canvas_width(), h = r.canvas_height();
+  if (glEl.width !== w || glEl.height !== h) {
+    glEl.width = w; glEl.height = h;
+    glEl.style.width = w / dpr + 'px'; glEl.style.height = h / dpr + 'px';
+  }
+  stats['shaded pixels per frame'] = w + '×' + h + ' = ' + (w * h).toLocaleString('en') + ' (' + (w * h / (pageEl.width * pageEl.height) * 100).toFixed(2) + ' % of the page, DPR ' + dpr + ')';
+  stats['centre magnification'] = '×' + r.magnification().toFixed(3);
+  glPlace();
+}
+
+// ---- SVG backend: the same parameters, the maps from the CPU reference ----
+const slot = {};
+function loadMap(kind, apply) {
+  const u = '/lab/optics/surface/map?kind=' + kind + '&dpr=' + dpr + '&' + query();
+  const s = slot[kind] || (slot[kind] = {});
+  s.want = u;
+  if (s.have === u) return;
+  if (s.ctrl) s.ctrl.abort();
+  const ctrl = s.ctrl = new AbortController();
+  mapFetches++;
+  fetch(u, { signal: ctrl.signal }).then((res) => {
+    if (!res.ok) throw new Error(kind + ': HTTP ' + res.status);
+    return res.blob().then((b) => {
+      if (s.want !== u) return;
+      const obj = URL.createObjectURL(b);
+      if (s.obj) URL.revokeObjectURL(s.obj);
+      s.obj = obj; s.have = u;
+      apply(obj, res.headers);
+    });
+  }).catch((e) => { if (e.name !== 'AbortError') stats['error'] = String(e), show(); });
+}
+function svgPlace() {
+  const b = svgEl.dataset.box ? svgEl.dataset.box.split('x').map(Number) : [0, 0];
+  svgEl.style.transform = 'translate(' + (center[0] - b[0] / 2) / dpr + 'px,' + (center[1] - b[1] / 2) / dpr + 'px)';
+}
+function svgUpdate() {
+  $('#rimL').style.display = term('rim') ? '' : 'none';
+  $('#specL').style.display = term('spec') ? '' : 'none';
+  loadMap('disp', (obj, h) => {
+    const [bw, bh] = h.get('x-a2ui-box').split('x').map(Number);
+    svgEl.dataset.box = bw + 'x' + bh;
+    svgEl.style.width = bw / dpr + 'px'; svgEl.style.height = bh / dpr + 'px';
+    svgEl.style.borderRadius = (+h.get('x-a2ui-corner') + 1) / dpr + 'px';
+    const m = $('#map'); m.setAttribute('href', obj); m.setAttribute('width', bw / dpr); m.setAttribute('height', bh / dpr);
+    const on = term('refraction');
+    ['r', 'g', 'b'].forEach((c) => $('#d' + c).setAttribute('scale', on ? +h.get('x-a2ui-scale-' + c) / dpr : 0));
+    const [wd, wf, ww] = h.get('x-a2ui-weights').split(' ').map(Number);
+    const [fs, ws] = h.get('x-a2ui-sigma').split(' ').map(Number);
+    $('#fineB').setAttribute('stdDeviation', fs / dpr); $('#wideB').setAttribute('stdDeviation', ws / dpr);
+    $('#mixDF').setAttribute('k2', wd); $('#mixDF').setAttribute('k3', wf);
+    $('#mixW').setAttribute('k2', 1); $('#mixW').setAttribute('k3', ww);
+    const [tr, tg, tb, ta] = h.get('x-a2ui-tint').split(' ').map(Number);
+    svgEl.style.background = 'rgba(' + tr + ',' + tg + ',' + tb + ',' + ta + ')';
+    stats['SVG maps'] = bw + '×' + bh + ' px, computed in ' + h.get('x-a2ui-render-us') + ' µs';
+    stats['SVG encoding error p50/p95/p99/max px'] = h.get('x-a2ui-svg-error');
+    svgPlace(); show();
+  });
+  loadMap('spec', (obj) => { $('#specL').style.backgroundImage = 'url(' + obj + ')'; });
+  loadMap('rim', (obj) => { $('#rimL').style.backgroundImage = 'url(' + obj + ')'; });
+}
+
+function update() {
+  outputs();
+  const gl = backend() === 'gl' && r;
+  glEl.hidden = !gl; svgEl.hidden = !!gl;
+  if (gl) glUpdate(); else svgUpdate();
+  history.replaceState(null, '', location.pathname + '?preset=' + preset + '&backend=' + backend());
+}
+function place() { if (backend() === 'gl' && r) glPlace(); else svgPlace(); }
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  const w = Math.round(innerWidth * dpr), h = Math.round(innerHeight * dpr);
+  const t0 = performance.now();
+  drawPage(pageEl, w, h, dpr);
+  stats['page raster (2-D canvas)'] = fmt(performance.now() - t0) + ', ' + w + '×' + h + ' device px';
+  if (r) stats['page texture upload + mipmaps (call)'] = fmt(r.set_background(pageEl)) + ', ' + (w * h * 4 * 4 / 3 / 1048576).toFixed(1) + ' MiB with mips';
+  if (!center[0]) center = [Math.round(Math.min(360, innerWidth / 2) * dpr), Math.round(Math.min(260, innerHeight / 3) * dpr)];
+  update();
+}
+
+let timer = 0;
+document.addEventListener('input', (e) => { if (e.target.id === 'backend') return; clearTimeout(timer); timer = setTimeout(update, 40); });
+$('#backend').addEventListener('change', update);
+let rt = 0;
+addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
+let grab = null;
+[glEl, svgEl].forEach((t) => {
+  t.addEventListener('pointerdown', (e) => { grab = [e.clientX * dpr - center[0], e.clientY * dpr - center[1]]; t.setPointerCapture(e.pointerId); t.classList.add('drag'); });
+  t.addEventListener('pointermove', (e) => { if (!grab) return; center = [Math.round(e.clientX * dpr - grab[0]), Math.round(e.clientY * dpr - grab[1])]; place(); });
+  t.addEventListener('pointerup', () => { grab = null; t.classList.remove('drag'); });
+});
+
+$('#bench').addEventListener('click', () => {
+  if (!r || backend() !== 'gl') { stats['bench'] = 'WebGL2 backend only: the SVG path has no per-frame work in JS, and the browser\'s compositing time is not observable from the page'; show(); return; }
+  const out = [], start = center.slice();
+  const t0 = performance.now();
+  for (let k = 0; k < 120; k++) {
+    r.set_center(Math.round(start[0] + 160 * dpr * Math.cos(k / 19)), Math.round(start[1] + 90 * dpr * Math.sin(k / 23)));
+    out.push(r.render(true));
+  }
+  const total = performance.now() - t0;
+  r.set_center(start[0], start[1]); glPlace();
+  out.sort((a, b) => a - b);
+  stats['bench 120 moving frames'] = 'mean ' + fmt(total / 120) + ', p95 ' + fmt(out[114]) + ', max ' + fmt(out[119]) + ' · ' + glEl.width + '×' + glEl.height + ' px · DPR ' + dpr;
+  show();
+});
+$('#parity').addEventListener('click', () => {
+  if (!r) return;
+  r.set_params(query(), dpr); r.set_terms(term('refraction'), term('rim'), term('spec'));
+  stats['parity'] = r.parity(); glPlace(); show();
+});
+$('#idle').addEventListener('click', () => {
+  const f0 = r ? r.frames : 0, m0 = mapFetches;
+  setTimeout(() => {
+    stats['idle 1 s'] = 'GPU frames drawn ' + ((r ? r.frames : 0) - f0) + ', map requests ' + (mapFetches - m0);
+    show();
+  }, 1000);
+});
+
+const lens = CSS.supports('backdrop-filter', 'url(#a)') && !!(navigator.userAgentData && navigator.userAgentData.brands.some((b) => /Chrom/.test(b.brand)));
+try {
+  const t0 = performance.now();
+  const mod = await import('/lab/optics/gl/a2ui_optics_gl.js');
+  const wasm = await mod.default({ module_or_path: '/lab/optics/gl/a2ui_optics_gl_bg.wasm' });
+  stats['wasm fetch + compile + instantiate'] = fmt(performance.now() - t0);
+  const ent = performance.getEntriesByType('resource').find((x) => x.name.endsWith('_bg.wasm'));
+  if (ent) stats['wasm'] = (ent.decodedBodySize / 1024).toFixed(1) + ' KiB';
+  r = new mod.SurfaceRenderer(glEl);
+  stats['WebGL2 context + shader compile'] = fmt(r.init_ms);
+  stats['renderer'] = r.backend();
+  stats['wasm linear memory'] = (wasm.memory.buffer.byteLength / 1048576).toFixed(2) + ' MiB';
+} catch (e) {
+  $('#backend').value = 'svg';
+  stats['WebGL2'] = 'did not start: ' + e;
+}
+$('#support').textContent = (r ? 'WebGL2 renderer running. ' : 'WebGL2 unavailable. ') + (lens ? 'SVG backdrop filter available.' : 'No SVG backdrop filter here (Chromium only).');
+dpr = window.devicePixelRatio || 1;
+await loadPreset(preset);
+resize();
+window.__lab = { stats, get r() { return r; }, loadPreset, update, center: () => center, setBackend: (b) => { $('#backend').value = b; update(); } };
+</script>
+</html>

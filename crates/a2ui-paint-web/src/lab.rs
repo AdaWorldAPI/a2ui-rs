@@ -33,9 +33,10 @@ const PAGE: &str = include_str!("lab.html");
 /// The raindrop experiment: a movable droplet over a page of text.
 const DROP_PAGE: &str = include_str!("drop.html");
 
-/// The raindrop on the GPU: the same droplet evaluated by the WebGL2 shader of
+/// Optical surfaces (droplet, capsule, card presets of one specification) on two backends:
+/// SVG filters over CPU maps (`/lab/optics/surface/map`) and the WebGL2 shader of
 /// `a2ui-optics-gl` (wasm, raw WebGL2, no wgpu).
-const DROP_GL_PAGE: &str = include_str!("drop-gl.html");
+const SURFACE_PAGE: &str = include_str!("surface.html");
 
 /// Largest map edge the server renders, px.
 const MAX_EDGE: u32 = 1600;
@@ -55,12 +56,123 @@ pub fn routes(app: Router) -> Router {
         .route("/lab/optics/params", get(params))
         .route("/lab/optics/drop", get(drop_page))
         .route("/lab/optics/drop/map", get(drop_map))
-        .route("/lab/optics/drop-gl", get(drop_gl_page))
+        .route("/lab/optics/surface", get(surface_page))
+        .route("/lab/optics/surface/map", get(surface_map))
+        .route("/lab/optics/surface/params", get(surface_params))
+        // the droplet on the GPU, as first shipped: the surface page's droplet preset
+        .route("/lab/optics/drop-gl", get(surface_page))
         .route("/lab/optics/gl/{file}", get(gl_file))
 }
 
-async fn drop_gl_page() -> Html<&'static str> {
-    Html(DROP_GL_PAGE)
+async fn surface_page() -> Html<&'static str> {
+    Html(SURFACE_PAGE)
+}
+
+/// A preset's full parameter set as a query string (`Surface::to_query`): the page fills its
+/// controls from it, so preset values exist only in Rust.
+async fn surface_params(RawQuery(raw): RawQuery) -> Response {
+    let s = a2ui_paint::optics::surface::Surface::from_query(raw.as_deref().unwrap_or(""));
+    (
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        s.to_query(),
+    )
+        .into_response()
+}
+
+/// One map of a surface as PNG (`kind` = `disp|spec|rim`; every other key is the shared
+/// `Surface::from_query` contract, at the page's device pixel ratio `dpr`). Headers carry the
+/// per-channel filter scales, the box, and the SVG encoding's error against the reference.
+async fn surface_map(RawQuery(raw): RawQuery) -> Response {
+    let raw = raw.unwrap_or_default();
+    let mut kind = "disp";
+    let mut dpr = 1.0f32;
+    for pair in raw.split('&') {
+        match pair.split_once('=') {
+            Some(("kind", v @ ("disp" | "spec" | "rim"))) => kind = v,
+            Some(("dpr", v)) => {
+                dpr = v
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|x| x.is_finite())
+                    .map_or(1.0, |x| x.clamp(0.5, 4.0))
+            }
+            _ => {}
+        }
+    }
+    let kind = kind.to_owned();
+    let surface = a2ui_paint::optics::surface::Surface::from_query(&raw).scaled(dpr);
+    let (bw, bh) = surface.map_box();
+    if bw.max(bh) > 4 * MAX_EDGE {
+        return (StatusCode::BAD_REQUEST, "surface too large").into_response();
+    }
+    let Ok(_permit) = permits().acquire().await else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
+    };
+    let out = tokio::task::spawn_blocking(move || {
+        let t = Instant::now();
+        let m = surface.render_maps();
+        let render_us = t.elapsed().as_micros();
+        let buf = match kind.as_str() {
+            "spec" => &m.specular,
+            "rim" => &m.rim,
+            _ => &m.displacement,
+        };
+        let png = png_rgba(m.width, m.height, buf)?;
+        let [r, g, b] = m.channel_scales;
+        let mut headers = vec![
+            ("x-a2ui-scale-r", format!("{r:.3}")),
+            ("x-a2ui-scale-g", format!("{g:.3}")),
+            ("x-a2ui-scale-b", format!("{b:.3}")),
+            ("x-a2ui-box", format!("{}x{}", m.width, m.height)),
+            (
+                "x-a2ui-corner",
+                format!("{:.3}", surface.footprint.corner_px()),
+            ),
+            ("x-a2ui-weights", {
+                let [d, f, w] = surface.scatter.normalized();
+                format!("{d:.4} {f:.4} {w:.4}")
+            }),
+            (
+                "x-a2ui-sigma",
+                format!(
+                    "{:.3} {:.3}",
+                    surface.scatter.fine_sigma, surface.scatter.wide_sigma
+                ),
+            ),
+            ("x-a2ui-tint", {
+                let [r, g, b] = surface.tint.rgb;
+                format!("{r} {g} {b} {:.3}", surface.tint.alpha)
+            }),
+            ("x-a2ui-render-us", render_us.to_string()),
+        ];
+        if kind == "disp" {
+            let e = surface.svg_map_error(&m);
+            let f = |s: &a2ui_paint::optics::surface::ErrorStats| {
+                format!("{:.3}/{:.3}/{:.3}/{:.3}", s.p50, s.p95, s.p99, s.max)
+            };
+            headers.push((
+                "x-a2ui-svg-error",
+                format!("r {} g {} b {}", f(&e[0]), f(&e[1]), f(&e[2])),
+            ));
+        }
+        Ok::<_, a2ui_paint::optics::PngError>((png, headers))
+    })
+    .await;
+    match out {
+        Ok(Ok((png, headers))) => {
+            let mut res = (
+                [
+                    (header::CONTENT_TYPE, "image/png"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                png,
+            )
+                .into_response();
+            set_headers(&mut res, headers);
+            res
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "map rendering failed").into_response(),
+    }
 }
 
 /// The only files the GPU page loads, and the only ones served. A whitelist, not a
@@ -531,8 +643,9 @@ mod tests {
     /// The GPU page drives the shared renderer; it computes no optics in JavaScript.
     #[test]
     fn the_gl_page_drives_the_renderer_not_a_copy() {
-        assert!(DROP_GL_PAGE.contains("/lab/optics/gl/a2ui_optics_gl.js"));
-        assert!(DROP_GL_PAGE.contains("new mod.DropRenderer"));
+        assert!(SURFACE_PAGE.contains("/lab/optics/gl/a2ui_optics_gl.js"));
+        assert!(SURFACE_PAGE.contains("new mod.SurfaceRenderer"));
+        assert!(SURFACE_PAGE.contains("/lab/optics/surface/map"));
         for forbidden in [
             "Math.sqrt",
             "Math.hypot",
@@ -541,7 +654,7 @@ mod tests {
             "getContext('webgl",
         ] {
             assert!(
-                !DROP_GL_PAGE.contains(forbidden),
+                !SURFACE_PAGE.contains(forbidden),
                 "drop-gl.html computes optics itself: {forbidden}"
             );
         }

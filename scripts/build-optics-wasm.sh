@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Build the raindrop GPU renderer (a2ui-optics-gl) for the browser.
+# Build the optical-surface GPU renderer (a2ui-optics-gl) for the browser.
 #
 #   ./scripts/build-optics-wasm.sh [out-dir]   # default: crates/a2ui-optics-gl/pkg
 #
@@ -42,12 +42,12 @@ echo "building (rust $TOOLCHAIN)…"
 cargo "+$TOOLCHAIN" build -p a2ui-optics-gl --target wasm32-unknown-unknown --release
 
 if command -v wasm-objdump >/dev/null 2>&1; then
-  syms=$(wasm-objdump -x "$WASM" | grep -ci 'droprenderer' || true)
+  syms=$(wasm-objdump -x "$WASM" | grep -ci 'surfacerenderer' || true)
   if [ "$syms" -eq 0 ]; then
-    echo "the module contains no DropRenderer symbol — the renderer was linked out." >&2
+    echo "the module contains no SurfaceRenderer symbol — the renderer was linked out." >&2
     exit 1
   fi
-  echo "  renderer present ($syms DropRenderer symbols)"
+  echo "  renderer present ($syms SurfaceRenderer symbols)"
 else
   echo "  (wasm-objdump absent — skipping the linked-out check)" >&2
 fi
