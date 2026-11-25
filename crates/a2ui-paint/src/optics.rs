@@ -39,6 +39,8 @@
 //! Pure arithmetic, no dependencies. The `optics-png` feature adds PNG encoding of the
 //! maps for consumers that serve them as image assets.
 
+pub mod surface;
+
 /// Samples in the one cross-section reused around the shape.
 pub const CROSS_SECTION_SAMPLES: usize = 128;
 

@@ -1,26 +1,27 @@
-//! **a2ui-optics-gl** — the raindrop on the GPU, without wgpu.
+//! **a2ui-optics-gl** — optical surfaces on the GPU, raw WebGL2, no wgpu.
 //!
-//! A WebGL2 fragment shader ([`FRAGMENT_SHADER`]) evaluates the droplet of
-//! [`a2ui_paint::optics`] per pixel: the spherical cap, the per-channel refraction
-//! through the same kernel ([`a2ui_paint::optics::refract_offset`], ported line for
-//! line), the Fresnel rim and the key-light highlight. Rust computes every constant the
-//! shader uses ([`DropUniforms`]) from the shared types, so there is one optical model
-//! and the shader is only its per-pixel evaluation.
+//! A WebGL2 fragment shader ([`FRAGMENT_SHADER`]) evaluates the one surface specification of
+//! [`a2ui_paint::optics::surface`] per pixel: footprint distance, shoulder and dome relief,
+//! per-channel refraction through the shared kernel (ported line for line), direct / fine /
+//! wide transmission, body tint, Fresnel rim and key-light highlight. Rust computes every
+//! constant the shader uses ([`SurfaceUniforms`]) from a [`Surface`], so droplet, capsule and
+//! card are presets of one model, not shaders.
 //!
-//! The browser tier (`web` module, wasm32 only) drives raw WebGL2 through `web-sys`. wgpu
-//! is deliberately not used here: its adapter and device warm-up shows as a first-frame
-//! flicker. Frames are drawn on demand (a change of position, shape, medium or
-//! background), never in a loop.
+//! The browser tier (`web`, wasm32 only) drives raw WebGL2 through `web-sys`. wgpu is not
+//! used: its adapter and device warm-up shows as a first-frame flicker. Frames are drawn on
+//! change only, into a canvas the size of the surface's box.
 //!
-//! [`cpu_sample_points`] is the CPU reference for the shader's sampling positions; the
-//! browser parity check (`DropRenderer::parity`) reads the GPU result back and compares.
+//! The reference for the parity check is [`Surface::sample_points`] and
+//! [`Surface::coverage`]; the shader is two implementations' worth of risk against one
+//! specification, which is what the browser check (`SurfaceRenderer::parity`) measures.
 //!
 //! Experimental, Material Laboratory only (plan `.claude/plans/a2ui-material-appearance-v1.md`).
 
-use a2ui_paint::optics::{Droplet, KeyLight, Medium, refract_offset};
+pub use a2ui_paint::optics::surface::Surface;
+use a2ui_paint::optics::surface::half_vector;
 
 /// The fragment shader (GLSL ES 3.00).
-pub const FRAGMENT_SHADER: &str = include_str!("drop.frag");
+pub const FRAGMENT_SHADER: &str = include_str!("surface.frag");
 
 /// A full-screen triangle from `gl_VertexID`; no vertex buffers.
 pub const VERTEX_SHADER: &str = "#version 300 es
@@ -30,166 +31,119 @@ void main() {
 }
 ";
 
-/// Everything the shader needs, in device pixels, computed from the shared model.
+/// Margin around the surface's box in the GPU canvas, device px (room for the edge ramp).
+pub const CANVAS_MARGIN: u32 = 2;
+
+/// Everything the shader needs, in device pixels, computed from one [`Surface`].
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DropUniforms {
-    pub center: [f32; 2],
-    pub radius: f32,
-    pub sphere: f32,
-    pub height: f32,
+pub struct SurfaceUniforms {
+    pub halfsize: [f32; 2],
+    pub corner: f32,
+    pub inradius: f32,
+    pub relief: [f32; 4],
+    pub base: f32,
     pub ior: [f32; 3],
     pub refraction: f32,
+    pub weights: [f32; 3],
+    pub sigma: [f32; 2],
+    pub tint: [f32; 4],
     pub f0: f32,
     pub rim: f32,
-    pub half: [f32; 3],
+    pub hv: [f32; 3],
     pub shininess: f32,
     pub spec: f32,
 }
 
-impl DropUniforms {
-    /// The uniforms for a drop at `center` (device pixels) with the given shape, medium,
-    /// dispersion exaggeration (0 off, 1 physical) and light. `terms` switches refraction,
-    /// rim and highlight (ablation).
+impl SurfaceUniforms {
+    /// The uniforms of `s` (already in device pixels). `terms` switches refraction, rim and
+    /// highlight (ablation).
     #[must_use]
-    pub fn new(
-        center: [f32; 2],
-        droplet: Droplet,
-        medium: Medium,
-        dispersion: f32,
-        light: KeyLight,
-        terms: [bool; 3],
-    ) -> Self {
-        let ior = medium.channel_iors(dispersion);
-        let g = ior[1];
-        let (az, el) = (
-            light.angle_deg.to_radians(),
-            light.elevation_deg.to_radians(),
-        );
-        let l = [az.cos() * el.cos(), az.sin() * el.cos(), el.sin()];
-        let v = [l[0], l[1], l[2] + 1.0];
-        let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+    pub fn new(s: &Surface, terms: [bool; 3]) -> Self {
         let on = |b: bool| if b { 1.0 } else { 0.0 };
+        let fp = s.footprint;
+        let rl = s.relief;
         Self {
-            center,
-            radius: droplet.radius,
-            sphere: droplet.sphere_radius(),
-            height: droplet.height.clamp(1e-3, droplet.radius.max(1e-3)),
-            ior,
+            halfsize: [fp.width / 2.0, fp.height / 2.0],
+            corner: fp.corner_px(),
+            inradius: fp.inradius(),
+            relief: [rl.height, rl.face, rl.shoulder, rl.profile],
+            base: rl.base,
+            ior: s.medium.channel_iors(s.dispersion),
             refraction: on(terms[0]),
-            f0: ((g - 1.0) / (g + 1.0)).powi(2),
-            rim: light.rim * on(terms[1]),
-            half: [v[0] / len, v[1] / len, v[2] / len],
-            shininess: light.shininess,
-            spec: light.intensity * on(terms[2]),
+            weights: s.scatter.normalized(),
+            sigma: [s.scatter.fine_sigma, s.scatter.wide_sigma],
+            tint: {
+                let [r, g, b] = s.tint.rgb.map(|c| f32::from(c) / 255.0);
+                [r, g, b, s.tint.alpha.clamp(0.0, 1.0)]
+            },
+            f0: s.f0(),
+            rim: s.light.rim * on(terms[1]),
+            hv: half_vector(&s.light),
+            shininess: s.light.shininess,
+            spec: s.light.intensity * on(terms[2]),
         }
     }
 }
 
-/// Where the shader samples the page for the pixel whose centre is `pt` (device pixels,
-/// top-left origin), per channel: the CPU reference for the GPU parity check. Outside the
-/// drop every channel samples `pt` itself.
+/// The GPU canvas for `s` (device pixels): its box plus [`CANVAS_MARGIN`] each side.
 #[must_use]
-pub fn cpu_sample_points(u: &DropUniforms, droplet: Droplet, pt: [f32; 2]) -> [[f32; 2]; 3] {
-    let d = [pt[0] - u.center[0], pt[1] - u.center[1]];
-    let r = (d[0] * d[0] + d[1] * d[1]).sqrt();
-    let Some((h, slope)) = droplet.surface(r) else {
-        return [pt; 3];
-    };
-    let dir = if r > 0.0 {
-        [d[0] / r, d[1] / r]
-    } else {
-        [0.0, 0.0]
-    };
-    u.ior.map(|n| {
-        let off = refract_offset(slope, h, n) * u.refraction;
-        [pt[0] + dir[0] * off, pt[1] + dir[1] * off]
-    })
+pub fn canvas_size(s: &Surface) -> (u32, u32) {
+    let (w, h) = s.map_box();
+    (w + 2 * CANVAS_MARGIN, h + 2 * CANVAS_MARGIN)
 }
 
 #[cfg(target_arch = "wasm32")]
 mod web;
 #[cfg(target_arch = "wasm32")]
-pub use web::DropRenderer;
+pub use web::SurfaceRenderer;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    const DROP: Droplet = Droplet {
-        radius: 100.0,
-        height: 85.0,
-    };
+    use a2ui_paint::optics::Medium;
 
     #[test]
     fn uniforms_come_from_the_shared_model() {
-        let u = DropUniforms::new(
-            [128.0, 128.0],
-            DROP,
-            Medium::WATER,
-            1.0,
-            KeyLight::DEFAULT,
-            [true; 3],
-        );
-        assert_eq!(u.ior, Medium::WATER.channel_iors(1.0));
-        assert_eq!(u.sphere, DROP.sphere_radius());
-        assert!((u.f0 - 0.0201).abs() < 1e-3, "{}", u.f0);
-        let n = (u.half[0].powi(2) + u.half[1].powi(2) + u.half[2].powi(2)).sqrt();
+        let s = Surface::preset("aqua").unwrap();
+        let u = SurfaceUniforms::new(&s, [true; 3]);
+        assert_eq!(u.ior, s.medium.channel_iors(s.dispersion));
+        assert_eq!(u.weights, s.scatter.normalized());
+        assert_eq!(u.halfsize, [160.0, 100.0]);
+        assert_eq!(u.corner, s.footprint.corner_px());
+        assert_eq!(u.relief, [16.0, 0.08, 17.0, 4.0]);
+        assert!((u.tint[3] - 0.35).abs() < 1e-6);
+        let n = u.hv.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((n - 1.0).abs() < 1e-5);
-        let off = DropUniforms::new(
-            [0.0; 2],
-            DROP,
-            Medium::WATER,
-            1.0,
-            KeyLight::DEFAULT,
-            [false; 3],
-        );
+        let off = SurfaceUniforms::new(&s, [false; 3]);
         assert_eq!((off.refraction, off.rim, off.spec), (0.0, 0.0, 0.0));
+        let water = Surface {
+            medium: Medium::WATER,
+            ..s
+        };
+        assert!((SurfaceUniforms::new(&water, [true; 3]).f0 - 0.0201).abs() < 1e-3);
     }
 
-    /// The CPU reference samples inwards inside the drop, by exactly the shared kernel, and
-    /// leaves everything outside untouched.
     #[test]
-    fn the_cpu_reference_matches_the_kernel() {
-        let u = DropUniforms::new(
-            [128.0, 128.0],
-            DROP,
-            Medium::WATER,
-            0.0,
-            KeyLight::DEFAULT,
-            [true; 3],
-        );
-        let pt = [178.5, 128.0];
-        let s = cpu_sample_points(&u, DROP, pt);
-        let (h, slope) = DROP.surface(50.5).unwrap();
-        let want = refract_offset(slope, h, Medium::WATER.ior);
-        assert!(want < -1.0);
-        assert!((s[1][0] - (pt[0] + want)).abs() < 1e-4 && (s[1][1] - pt[1]).abs() < 1e-6);
-        assert_eq!(cpu_sample_points(&u, DROP, [10.0, 10.0]), [[10.0, 10.0]; 3]);
-        let flat = DropUniforms::new(
-            [128.0, 128.0],
-            DROP,
-            Medium::WATER,
-            0.0,
-            KeyLight::DEFAULT,
-            [false, true, true],
-        );
-        assert_eq!(
-            cpu_sample_points(&flat, DROP, pt),
-            [pt; 3],
-            "refraction off samples in place"
-        );
+    fn the_canvas_is_the_box_plus_the_margin() {
+        let s = Surface::preset("capsule").unwrap();
+        assert_eq!(canvas_size(&s), (272 + 4, 92 + 4));
+        assert_eq!(canvas_size(&s.scaled(3.0)), (812 + 4, 272 + 4));
     }
 
-    /// The GLSL port carries the same kernel: every line of `refract_offset` appears.
+    /// The GLSL port carries the same kernel and relief law: their lines appear verbatim.
     #[test]
-    fn the_shader_ports_the_kernel() {
+    fn the_shader_ports_the_specification() {
         for line in [
             "float nl = sqrt(slope * slope + 1.0);",
             "float eta = 1.0 / max(ior, 1e-3);",
             "float k = 1.0 - eta * eta * (1.0 - cosi * cosi);",
             "float m = eta * cosi - sqrt(k);",
             "return tx / abs(tz) * travel;",
-            "float root = sqrt(max(u_sphere * u_sphere - r * r, 1e-6));",
+            "float t = clamp(d / W, 1e-4, 1.0);",
+            "float u = 1.0 - pow(1.0 - t, p);",
+            "float rs = (rin * rin + hd * hd) / (2.0 * hd);",
+            "float a = clamp(0.5 - sd, 0.0, 1.0);",
+            "col = mix(col, u_tint.rgb, u_tint.a);",
         ] {
             assert!(FRAGMENT_SHADER.contains(line), "shader lacks: {line}");
         }
