@@ -77,7 +77,7 @@ material (report-rs already does this with `data-material`).
 | Material registry, material CSS, presets, atmosphere value type with validation and CSS projection (`Aqua` → `Atmosphere`) | `a2ui-theme` | zero-dependency, already the shared asset home, already consumed by report-rs | none |
 | Appearance sidecar markup, styles and script; Material Studio; Material-Labor page assets | `a2ui-theme` assets (`asset()`), markup builder as a function | same consumers, no dependency added | whether the markup builder belongs in `a2ui-theme` or a small `a2ui-appearance` module there |
 | Sidecar placement arithmetic (anchor, viewport collision, sheet breakpoint) | `a2ui-layout` | pure geometry, zero-dependency, already the shared budget/zone home | the JS mirrors the arithmetic, or a wasm build calls the Rust (see §6) |
-| Optical mathematics: rounded-rectangle SDF, bevel height profile, normals, Snell displacement, Fresnel, scattering parameters, displacement-map encoding | **decision needed** — see below | must be renderer-independent and must not pull OGAR or GPU deps into HTML consumers | crate placement |
+| Optical mathematics: rounded-rectangle SDF, bevel height profile, normals, Snell displacement, Fresnel, scattering parameters, displacement-map encoding | `a2ui-paint` (`optics` module) — decided 2026-11-25, see below | renderer-independent; no GPU deps for HTML consumers | none |
 | Browser composition: SVG filter, `backdrop-filter`, per-size map generation, fallback detection | `a2ui-theme` assets (JS) for HTML consumers; `a2ui-paint-web` for the demo | HTML consumers need no wasm/GPU | wasm vs JS for map generation |
 | GPU optical rendering | `a2ui-paint` behind `wgpu` | GPU stays optional | later, after acceptance |
 | Persistence (cookie names, tenant preferences), authentication, permissions, business logic | consumer (report-rs) | application-specific | none |
@@ -100,6 +100,23 @@ Recommendation: **option 3** if the paint maintainers accept the feature split (
 math where the renderers already live and keeps HTML consumers dependency-free); **option 4**
 otherwise. The 2-D rounded-rectangle SDF is four lines; it should not be shared with
 `a2ui-solid`'s 3-D CSG evaluator (different domain, different metric caveats).
+
+**DECISION (operator, 2026-11-25): option 3, without the feature split.** Operator: *"I
+presume any askama is via a2ui-rs so a2ui-rs is the proper place. If ndarray wasm is needed I
+think a2ui-rs also has it optional."* Consequences:
+
+- The optics math lives in `a2ui-paint` as an `optics` module. Its OGAR render dependency stays
+  unconditional: an HTML consumer reaching askama through a2ui-rs is the intended shape, so
+  pulling `ogar-render-askama` is accepted. Checked on this date: report-rs and
+  `ogar-render-askama` both use `askama = "0.12"`, so the versions unify.
+- Correction to the premise, recorded so step D does not assume it: report-rs today depends on
+  `askama` directly (`src/frame.rs`, `src/view.rs` and others), not through a2ui-rs. Routing its
+  templates through a2ui-rs is not part of this plan.
+- Per-pixel map generation (one value per card pixel) takes its SIMD from `ndarray::simd`,
+  behind an **optional** `a2ui-paint` feature, so wasm gets the polyfill and a consumer that only
+  needs the scalar cross-section (128 samples) pulls no ndarray. Correction to the premise:
+  ndarray is not optional anywhere in a2ui-rs today; `a2ui-graph` depends on it unconditionally
+  (`default-features = false, features = ["std"]`). The optional feature is new in step B.
 
 ## 6. Optical engine (from the research in report-rs `docs/plans/aqua-glass-optics-research-v1.md`)
 
@@ -177,8 +194,9 @@ with material on and off).
 G5 — **No silhouette**: the rear-light layer has no mask, no clip and fades to transparent
 inside its own box (static check on the stylesheet plus a pixel check at the box edge).
 
-G6 — **Dependencies**: an HTML consumer that enables the material pulls no `wgpu`, no WebGL
-requirement and no OGAR render crate (check `cargo tree` of a consumer fixture).
+G6 — **Dependencies**: an HTML consumer that enables the material pulls no `wgpu` and no WebGL
+requirement, and pulls ndarray only when it enables the map-generation feature (check
+`cargo tree` of a consumer fixture). The OGAR render crate is allowed (decision of 2026-11-25).
 
 G7 — **Fallbacks**: non-Chromium gets the frosted fallback; `prefers-reduced-transparency`,
 `prefers-contrast: more` and `forced-colors` get solid surfaces.
