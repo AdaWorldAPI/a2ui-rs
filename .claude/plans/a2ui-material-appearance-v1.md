@@ -218,12 +218,14 @@ renders differ only in the rear-light colour; the neutral highlights and the gla
 identical (compare the material layer with rear light switched off: pixel-identical).
 
 G3 — **Strength 0 is neutral**: at strength 0 every optical term is off (no refraction, no
-caustic, no rear light); test by rendering with each term's switch on and off at strength 0 and
-asserting equality.
+caustic, no rear light); test by comparing the strength-0 render with a neutral baseline
+rendered with every optical term disabled (no filter, no overlay, no rear field), not only each
+term's switch on and off, which an always-active term would pass.
 
 G4 — **Non-interference**: switching the material changes no text, no action address, no
-`data-*` used for behaviour, and no layout box (compare DOM text, `href`s and element rects
-with material on and off).
+`data-*` used for behaviour, and no layout box (compare DOM text, `href`s, behavioural
+`data-*` attributes, any other attribute that carries an action address, and element rects with
+material on and off).
 
 G5 — **No silhouette**: the rear-light layer has no mask, no clip and fades to transparent
 inside its own box (static check on the stylesheet plus a pixel check at the box edge).
@@ -244,7 +246,7 @@ G8 — **No duplicate renderer**: after migration report-rs contains no optical 
 |---|---|---|---|
 | A | a2ui-rs | Material registry and atmosphere contracts in `a2ui-theme` (separate material from theme; `Atmosphere` value type with validation, `key`/`parse`, CSS projection, presets). Port the generic #209 tests. | unit tests; G3 (static part) |
 | B | a2ui-rs | Optical mathematics module (placement per §5 decision) and the Material Laboratory in `a2ui-paint-web`, from the #209 optics prototype. | **G1**, G2, G3, G5 |
-| C | a2ui-rs | Browser composition assets (SVG filter, map generation, fallback) and the shared appearance sidecar (markup builder, styles, script; placement arithmetic in `a2ui-layout`). | G4, G6, G7 |
+| C | a2ui-rs | Browser composition assets (SVG filter, map generation, fallback) and the shared appearance sidecar (markup builder, styles, script; placement arithmetic in `a2ui-layout`). The Material Laboratory renders these same assets, not its own copy. | **G1**, G2, G3, G5 on these assets; G4, G6, G7 |
 | D | report-rs | Replace the local implementation with the a2ui-rs one; keep cookie names, persistence, menu placement. Remove `static/aqua-*`, `static/optics-lab.*`, the material CSS and the lab routes. | G8, report-rs P75 equivalents |
 | E | other consumers | Adopt the same tier. | per consumer |
 
