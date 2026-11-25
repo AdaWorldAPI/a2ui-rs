@@ -13,13 +13,14 @@ body[data-bg=split]{background:linear-gradient(90deg,#000 50%,#fff 50%)}
 body[data-bg=gradient]{background:linear-gradient(135deg,#1d2a44,#9fb4d6 45%,#f4f6fa)}
 body[data-bg=rgb]{background:linear-gradient(90deg,#e0102f 0 33%,#10a050 33% 66%,#1050e0 66%)}
 body[data-bg=page]{background:#eef1f6}
-.page-text{display:none;position:absolute;inset:24px 360px 24px 24px;columns:3 260px;color:#253041;font-size:15px}
+.page-text{display:none;position:absolute;inset:0;padding:16px 20px;columns:4 240px;column-gap:26px;color:#253041;font-size:15px;line-height:1.45}
+.page-text p{margin:0 0 .6em}
 body[data-bg=page] .page-text{display:block}
 #rear{position:absolute;pointer-events:none;background-size:100% 100%;background-repeat:no-repeat}
 #glass{position:absolute;left:120px;top:140px;width:420px;height:200px;border-radius:28px;cursor:grab;touch-action:none;
   background:var(--tint,transparent);-webkit-backdrop-filter:blur(var(--frost,0px));backdrop-filter:blur(var(--frost,0px))}
 .lens #glass{-webkit-backdrop-filter:url(#lens);backdrop-filter:url(#lens)}
-#spec{position:absolute;inset:0;pointer-events:none;background-size:100% 100%;border-radius:inherit}
+#spec,#fresnel{position:absolute;inset:0;pointer-events:none;background-size:100% 100%;border-radius:inherit}
 #glass .label{position:absolute;left:24px;top:18px;font-weight:600;font-size:20px;pointer-events:none}
 #panel{position:fixed;top:0;right:0;bottom:0;width:340px;overflow:auto;padding:14px 16px;background:#fbfcfe;
   border-left:1px solid #d9dee7;font-size:13px}
@@ -34,21 +35,15 @@ body[data-bg=page] .page-text{display:block}
 #panel button{font:inherit;padding:3px 8px;border:1px solid #c6cdd8;border-radius:6px;background:#fff;cursor:pointer}
 #readout{font:12px ui-monospace,monospace;color:#334;white-space:pre-wrap}
 @media (max-width:720px){#panel{top:auto;width:auto;left:0;height:46%;border-left:0;border-top:1px solid #d9dee7}
-  .page-text{inset:16px 16px 48% 16px}}
+  .page-text{columns:2 160px}}
 @media (prefers-reduced-transparency:reduce),(prefers-contrast:more),(forced-colors:active){
   #glass,.lens #glass{-webkit-backdrop-filter:none;backdrop-filter:none;background:Canvas}
-  #spec,#rear{display:none}}
+  #spec,#fresnel,#rear{display:none}}
 </style>
 <body data-bg="checker">
-<div class="page-text">Glass is judged against something behind it. This page puts one element over
-backgrounds whose structure is known: a checkerboard shows displacement, lines show distortion,
-the black and white halves show transmission, the coloured bands show any dispersion, and this
-text shows how readable a page stays under the material. Every map on the element is computed by
-the a2ui-paint optics engine on the server; the page only asks for it. Drag the element to see the
-lensing move over the background. The rear light is a separate field behind the element. It fades
-to transparent inside its own box and has no mask, so it can never draw an outline.</div>
+<div class="page-text"></div>
 <div id="rear"></div>
-<div id="glass"><div id="spec"></div><div class="label">Aqua Glass</div></div>
+<div id="glass"><div id="fresnel"></div><div id="spec"></div><div class="label">Aqua Glass</div></div>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <filter id="lens" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
 <feImage id="dispmap" x="0" y="0" preserveAspectRatio="none" result="map"/>
@@ -59,6 +54,7 @@ to transparent inside its own box and has no mask, so it can never draw an outli
 </filter></defs></svg>
 <form id="panel" onsubmit="return false">
 <h1>Material Laboratory</h1>
+<p><a href="/lab/optics/drop">Raindrop experiment →</a></p>
 <p id="support"></p>
 <label><span>Background</span><select id="bg">
 <option value="checker">Checkerboard (displacement)</option><option value="stripes">Lines (distortion)</option>
@@ -75,10 +71,18 @@ to transparent inside its own box and has no mask, so it can never draw an outli
 <button type="button" data-hue="0" data-sat="0">Neutral</button></div>
 <fieldset><legend>Terms (ablation)</legend><div class="row">
 <label><input type="checkbox" data-term="refraction" checked> refraction</label>
-<label><input type="checkbox" data-term="scatter" checked> scattering</label>
-<label><input type="checkbox" data-term="rim" checked> rim</label>
+<label><input type="checkbox" data-term="fresnel" checked> Fresnel</label>
+<label><input type="checkbox" data-term="rim" checked> specular</label>
+<label><input type="checkbox" data-term="fine" checked> fine scatter</label>
+<label><input type="checkbox" data-term="wide" checked> wide scatter</label>
 <label><input type="checkbox" data-term="rear"> rear light</label>
-<label><input type="checkbox" data-term="tint" checked> tint</label></div></fieldset>
+<label><input type="checkbox" data-term="tint" checked> tint</label></div>
+<div class="row" id="stages">
+<button type="button" data-stage="1" title="refraction only">1</button><button type="button" data-stage="2" title="+ Fresnel">2</button>
+<button type="button" data-stage="3" title="+ directional specular">3</button><button type="button" data-stage="4" title="+ fine scattering">4</button>
+<button type="button" data-stage="5" title="+ wide scattering">5</button><button type="button" data-stage="6" title="+ rear light">6</button>
+<button type="button" data-stage="7" title="+ suspension and dispersion (not implemented on the card yet)">7</button></div>
+<small>Stages: 1 refraction · 2 +Fresnel · 3 +specular · 4 +fine scatter · 5 +wide scatter · 6 +rear light · 7 +suspension/dispersion (card: not implemented yet)</small></fieldset>
 <details><summary>Expert</summary>
 <label><span>Width <output data-for="w"></output></span><input data-q="w" type="range" min="40" max="1200" value="420"></label>
 <label><span>Height <output data-for="h"></output></span><input data-q="h" type="range" min="40" max="900" value="200"></label>
@@ -121,6 +125,7 @@ to transparent inside its own box and has no mask, so it can never draw an outli
     params: ['profile', 'bezel', 'thickness', 'depth', 'ior', 'refraction', 'fine', 'wide', 'share', 'tint', 'strength'],
     disp: ['w', 'h', 'radius', 'profile', 'bezel', 'thickness', 'depth', 'ior'],
     spec: ['w', 'h', 'radius', 'profile', 'bezel', 'thickness', 'ior', 'light', 'specexp', 'specop', 'strength'],
+    fresnel: ['w', 'h', 'radius', 'profile', 'bezel', 'thickness', 'ior', 'strength'],
     rear: ['hue', 'sat', 'halo', 'strength']
   };
   function url(kind, extra) {
@@ -162,14 +167,16 @@ to transparent inside its own box and has no mask, so it can never draw an outli
   function applyParams() {
     var p = slot.params && slot.params.h; if (!p) return;
     $('#disp').setAttribute('scale', term('refraction') ? p.get('x-a2ui-filter-scale') : '0');
-    var sc = term('scatter');
-    $('#fine').setAttribute('stdDeviation', sc ? p.get('x-a2ui-filter-fine') : '0');
-    $('#wide').setAttribute('stdDeviation', sc ? p.get('x-a2ui-filter-wide') : '0');
-    var share = +p.get('x-a2ui-filter-share');
+    var fine = term('fine'), wide = term('wide'), sc = fine || wide;
+    $('#fine').setAttribute('stdDeviation', fine ? p.get('x-a2ui-filter-fine') : '0');
+    $('#wide').setAttribute('stdDeviation', wide ? p.get('x-a2ui-filter-wide') : '0');
+    // one kernel alone carries the whole weight; both mix by the fine share
+    var share = fine && wide ? +p.get('x-a2ui-filter-share') : (fine ? 1 : 0);
+    if (!sc) share = 1;
     $('#mix').setAttribute('k2', String(share)); $('#mix').setAttribute('k3', String(1 - share));
     // the body tint scales with strength like every other term (engine: FilterParams::tint_alpha)
     // fallback without SVG backdrop filters: frost by the wide scattering σ, so it too is 0 at strength 0
-    glass.style.setProperty('--frost', (sc ? p.get('x-a2ui-filter-wide') : '0') + 'px');
+    glass.style.setProperty('--frost', (wide ? p.get('x-a2ui-filter-wide') : (fine ? p.get('x-a2ui-filter-fine') : '0')) + 'px');
     glass.style.setProperty('--tint', term('tint') ? 'rgb(241 241 241 / ' + p.get('x-a2ui-filter-tint') + ')' : 'transparent');
   }
   function placeRear() {
@@ -184,6 +191,7 @@ to transparent inside its own box and has no mask, so it can never draw an outli
     glass.style.width = w + 'px'; glass.style.height = hh + 'px';
     glass.style.borderRadius = Math.min(+val('radius'), w / 2, hh / 2) + 'px';
     spec.style.display = term('rim') ? '' : 'none';
+    $('#fresnel').style.display = term('fresnel') ? '' : 'none';
     rear.style.display = term('rear') ? '' : 'none';
     var box = placeRear();
     applyParams();
@@ -193,6 +201,7 @@ to transparent inside its own box and has no mask, so it can never draw an outli
       d.setAttribute('href', obj); d.setAttribute('width', w); d.setAttribute('height', hh);
     });
     load('spec', url('spec'), function (obj) { spec.style.backgroundImage = 'url(' + obj + ')'; });
+    load('fresnel', url('fresnel'), function (obj) { $('#fresnel').style.backgroundImage = 'url(' + obj + ')'; });
     // the rear field is smooth, so it is rendered at half resolution and scaled up
     load('rear', url('rear', ['w=' + Math.ceil(box[0] / 2), 'h=' + Math.ceil(box[1] / 2)]),
       function (obj) { rear.style.backgroundImage = 'url(' + obj + ')'; });
@@ -217,6 +226,23 @@ to transparent inside its own box and has no mask, so it can never draw an outli
     document.querySelector('[data-term="rear"]').checked = +b.dataset.sat > 0;
     build();
   });
+  var STAGES = ['refraction', 'fresnel', 'rim', 'fine', 'wide', 'rear', 'tint'];
+  $('#stages').addEventListener('click', function (e) {
+    var n = +e.target.dataset.stage; if (!n) return;
+    // each stage adds one mechanism to the previous one; the tint arrives with scattering
+    var on = { refraction: n >= 1, fresnel: n >= 2, rim: n >= 3, fine: n >= 4, wide: n >= 5, rear: n >= 6, tint: n >= 4 };
+    STAGES.forEach(function (t) { document.querySelector('[data-term="' + t + '"]').checked = on[t]; });
+    build();
+  });
+  // printed text over the whole page, so lines cross every optical boundary and the interior
+  (function () {
+    var para = 'Glass is judged against something behind it. A checkerboard shows displacement, lines show ' +
+      'distortion, black and white show transmission and coloured bands show dispersion; this text shows ' +
+      'how readable a page stays under the material and how the bevel bends the letters that cross it. ' +
+      'Every map on the element is computed by the a2ui-paint optics engine; the page only asks for it. ';
+    var h = ''; for (var i = 0; i < 70; i++) h += '<p>' + para + '</p>';
+    document.querySelector('.page-text').innerHTML = h;
+  })();
   var drag = null;
   glass.addEventListener('pointerdown', function (e) { drag = [e.clientX - glass.offsetLeft, e.clientY - glass.offsetTop]; glass.setPointerCapture(e.pointerId); });
   glass.addEventListener('pointermove', function (e) {

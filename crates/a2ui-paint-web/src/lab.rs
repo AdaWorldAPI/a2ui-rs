@@ -16,7 +16,9 @@ use std::time::Instant;
 
 use tokio::sync::Semaphore;
 
-use a2ui_paint::optics::{Glass, Profile, RearLight, png_rgba, rear_field};
+use a2ui_paint::optics::{
+    Droplet, Glass, KeyLight, Medium, Profile, RearLight, png_rgba, rear_field,
+};
 use axum::{
     Router,
     extract::RawQuery,
@@ -27,6 +29,9 @@ use axum::{
 
 /// The page. Static: its controls only build `/lab/optics/map` URLs.
 const PAGE: &str = include_str!("lab.html");
+
+/// The raindrop experiment: a movable droplet over a page of text.
+const DROP_PAGE: &str = include_str!("drop.html");
 
 /// Largest map edge the server renders, px.
 const MAX_EDGE: u32 = 1600;
@@ -44,6 +49,115 @@ pub fn routes(app: Router) -> Router {
     app.route("/lab/optics", get(page))
         .route("/lab/optics/map", get(map))
         .route("/lab/optics/params", get(params))
+        .route("/lab/optics/drop", get(drop_page))
+        .route("/lab/optics/drop/map", get(drop_map))
+}
+
+async fn drop_page() -> Html<&'static str> {
+    Html(DROP_PAGE)
+}
+
+/// The query of `/lab/optics/drop/map`: geometry, medium, dispersion exaggeration, light.
+#[derive(Debug, Clone, PartialEq)]
+struct DropQuery {
+    /// `disp`, `spec` or `rim`.
+    kind: String,
+    droplet: Droplet,
+    medium: Medium,
+    dispersion: f32,
+    light: KeyLight,
+}
+
+impl DropQuery {
+    fn parse(raw: &str) -> Self {
+        let mut q = Self {
+            kind: "disp".into(),
+            droplet: Droplet {
+                radius: 90.0,
+                height: 28.0,
+            },
+            medium: Medium::WATER,
+            dispersion: 0.0,
+            light: KeyLight::DEFAULT,
+        };
+        let mut curv = 0.85;
+        for pair in raw.split('&').filter(|s| !s.is_empty()) {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let n = || v.parse::<f32>().ok().filter(|x| x.is_finite());
+            match k {
+                "kind" if matches!(v, "disp" | "spec" | "rim") => q.kind = v.into(),
+                "r" => q.droplet.radius = n().map_or(q.droplet.radius, |x| x.clamp(8.0, 400.0)),
+                // curvature: apex height as a fraction of the footprint radius
+                "curv" => curv = n().map_or(curv, |x| x.clamp(0.02, 1.0)),
+                "medium" => {
+                    q.medium = match v {
+                        "glass" => Medium::CROWN_GLASS,
+                        "diamond" => Medium::DIAMOND,
+                        _ => Medium::WATER,
+                    }
+                }
+                "disp" => q.dispersion = n().map_or(q.dispersion, |x| x.clamp(0.0, 40.0)),
+                "light" => {
+                    q.light.angle_deg = n().map_or(q.light.angle_deg, |x| x.clamp(-360.0, 360.0))
+                }
+                "spec" => q.light.intensity = n().map_or(q.light.intensity, |x| x.clamp(0.0, 1.0)),
+                "rim" => q.light.rim = n().map_or(q.light.rim, |x| x.clamp(0.0, 1.0)),
+                _ => {}
+            }
+        }
+        q.droplet.height = curv * q.droplet.radius;
+        q
+    }
+}
+
+/// One droplet map as PNG; the per-channel filter scales come back as headers.
+async fn drop_map(RawQuery(raw): RawQuery) -> Response {
+    let q = DropQuery::parse(raw.as_deref().unwrap_or(""));
+    let Ok(_permit) = permits().acquire().await else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
+    };
+    let out = tokio::task::spawn_blocking(move || {
+        let t = Instant::now();
+        let m = q.droplet.render(q.medium, q.light, q.dispersion);
+        let render_us = t.elapsed().as_micros();
+        let buf = match q.kind.as_str() {
+            "spec" => &m.specular,
+            "rim" => &m.rim,
+            _ => &m.displacement,
+        };
+        let png = png_rgba(m.side, m.side, buf)?;
+        let [r, g, b] = m.channel_scales;
+        Ok::<_, a2ui_paint::optics::PngError>((
+            png,
+            vec![
+                ("x-a2ui-scale-r", format!("{r:.3}")),
+                ("x-a2ui-scale-g", format!("{g:.3}")),
+                ("x-a2ui-scale-b", format!("{b:.3}")),
+                ("x-a2ui-side", m.side.to_string()),
+                (
+                    "x-a2ui-magnification",
+                    format!("{:.3}", q.droplet.centre_magnification(q.medium.ior)),
+                ),
+                ("x-a2ui-render-us", render_us.to_string()),
+            ],
+        ))
+    })
+    .await;
+    match out {
+        Ok(Ok((png, headers))) => {
+            let mut res = (
+                [
+                    (header::CONTENT_TYPE, "image/png"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                png,
+            )
+                .into_response();
+            set_headers(&mut res, headers);
+            res
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "map rendering failed").into_response(),
+    }
 }
 
 async fn page() -> Html<&'static str> {
@@ -55,6 +169,7 @@ async fn page() -> Html<&'static str> {
 enum Kind {
     Displacement,
     Specular,
+    Fresnel,
     Rear,
 }
 
@@ -90,6 +205,7 @@ impl MapQuery {
                 "kind" => {
                     q.kind = match v {
                         "spec" => Kind::Specular,
+                        "fresnel" => Kind::Fresnel,
                         "rear" => Kind::Rear,
                         _ => Kind::Displacement,
                     }
@@ -107,6 +223,7 @@ impl MapQuery {
                 "wide" => g.wide_sigma = n().map_or(g.wide_sigma, |x| x.clamp(0.0, 60.0)),
                 "share" => g.fine_share = n().map_or(g.fine_share, |x| x.clamp(0.0, 1.0)),
                 "tint" => g.tint = n().map_or(g.tint, |x| x.clamp(0.0, 1.0)),
+                "reflect" => g.reflection = n().map_or(g.reflection, |x| x.clamp(0.0, 4.0)),
                 "light" => {
                     g.light_angle_deg = n().map_or(g.light_angle_deg, |x| x.clamp(-360.0, 360.0))
                 }
@@ -171,6 +288,7 @@ fn render_rgba(q: &MapQuery) -> Vec<u8> {
             q.glass.render_displacement(q.width, q.height, &cs)
         }
         Kind::Specular => q.glass.render_specular(q.width, q.height),
+        Kind::Fresnel => q.glass.render_fresnel(q.width, q.height),
         Kind::Rear => rear_field(q.width, q.height, q.rear, q.glass.strength),
     }
 }
@@ -325,5 +443,28 @@ mod tests {
                 .iter()
                 .any(|(k, v)| *k == "x-a2ui-size" && v == "64x40")
         );
+    }
+
+    #[test]
+    fn the_drop_query_reads_geometry_medium_and_dispersion() {
+        let q = DropQuery::parse("kind=rim&r=120&curv=0.5&medium=diamond&disp=4&bogus=1");
+        assert_eq!(q.kind, "rim");
+        assert_eq!((q.droplet.radius, q.droplet.height), (120.0, 60.0));
+        assert_eq!((q.medium, q.dispersion), (Medium::DIAMOND, 4.0));
+        let d = DropQuery::parse("curv=NaN&r=9999&medium=x");
+        assert_eq!((d.droplet.radius, d.medium), (400.0, Medium::WATER));
+        assert!((d.droplet.height / d.droplet.radius - 0.85).abs() < 1e-6);
+    }
+
+    /// The droplet page, like the card lab, computes no optics itself.
+    #[test]
+    fn the_drop_page_renders_the_engine_not_a_copy() {
+        assert!(DROP_PAGE.contains("/lab/optics/drop/map") && DROP_PAGE.contains("x-a2ui-scale-b"));
+        for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
+            assert!(
+                !DROP_PAGE.contains(forbidden),
+                "drop.html computes optics itself: {forbidden}"
+            );
+        }
     }
 }

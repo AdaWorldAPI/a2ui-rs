@@ -310,6 +310,39 @@ independently of G1; G1 stays open; C and D wait for G1.
   invisible at UI scale; a visible fringe needs an exaggerated Abbe number and must be labelled
   as such. Proposed API: `Glass { abbe: Option<f32> }`, `None` bit-identical to today.
 
+**Optical capability before aesthetics (2026-11-25, operator).** G1 not accepted: the card reads
+as a frosted sheet. First prove the renderer can make clear optical glass, then add scattering.
+
+- *Raindrop experiment* (`/lab/optics/drop`): a spherical cap resting on a page of printed text,
+  water / crown glass / diamond (`Medium` with n_d and Abbe number), curvature, exaggerable
+  dispersion, Fresnel rim and Blinn-Phong highlight, all through the shared `refract_offset`
+  kernel the card uses (card maps byte-identical after the refactor). The map depends only on
+  shape and medium, so dragging the drop computes and fetches nothing (measured: 0 requests
+  over a 40-step drag). Physical check pinned as a test: a hemisphere magnifies by exactly n
+  (water ×1.333, glass ×1.517, diamond ×2.417). At curvature 0.85: water ×1.27, glass ×1.40,
+  diamond ×1.97. Dispersion is three displacement passes recombined with `screen`; at ×1
+  (physical) the R/B scales differ by under 1 %, at ×12 fringes are clearly visible.
+- *Card stages* (`/lab/optics`, buttons 1–7): refraction → +Fresnel (new `render_fresnel`:
+  F0 on the face, rising on the bevel, independent of the key light) → +specular → +fine
+  scatter and tint → +wide scatter → +rear light; 7 (suspension, dispersion) is not implemented
+  on the card. Background text now fills the whole page.
+- *Does wide scattering hide the refraction?* Yes. Mean |difference| between refraction on and
+  off inside the card: page of text 3.35 levels at stage 1 vs 0.95 at stage 5 (max 194 vs 58);
+  checkerboard 3.93 vs 1.33 (max 98 vs 33). About 70 % of the refraction signal is lost.
+- *Why the card looks empty at stage 1:* a flat face does not refract; only the 17 px bevel
+  bends the background. The droplet shows the effect because its whole area is curved. A card
+  that reads as glass needs a wider, deeper bevel relative to its size (to be decided in the
+  lab, not tuned blind).
+- *GPU backend:* reuse matrix in `.claude/plans/a2ui-optics-gpu-reuse-matrix.md`. Only
+  `a2ui-graph` opens a browser wgpu surface (WebGPU / WebGL2); nothing samples a texture in
+  WGSL yet; `a2ui_paint::raster` can render text into RGBA without DOM screenshots.
+  Recommended path: WGSL glass pipeline in `a2ui-paint` under the `wgpu` feature, a wasm32
+  `web` module modelled on `a2ui-graph/src/web.rs`, on-demand frames, a CPU-vs-GPU readback
+  parity test. Not started: wasm build cost here is unmeasured.
+- *Weather track:* research note in `.claude/plans/ogar-weather-research-note.md` (layering:
+  provider-independent `Observation` in OGAR, pure solar geometry, projection to `Atmosphere`
+  in a2ui-theme; presets need no API or location; provider licences; seven open decisions).
+
 ## 10. Non-goals
 
 - No production integration before G1.
