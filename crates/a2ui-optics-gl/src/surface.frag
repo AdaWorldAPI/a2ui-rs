@@ -1,7 +1,7 @@
 #version 300 es
 // One optical surface, per pixel: the specification of a2ui_paint::optics::surface
 // (footprint SDF, shoulder + dome relief, refraction per channel, direct / fine / wide
-// transmission, tint, Fresnel rim, key-light highlight). Every constant comes from Rust
+// transmission, tint, Fresnel rim, environment reflection, key-light highlight, strength). Every constant comes from Rust
 // (SurfaceUniforms); nothing here is tuned by hand.
 precision highp float;
 
@@ -16,7 +16,7 @@ uniform float u_inradius;   // half the shorter side
 uniform vec4 u_relief;      // height H, face curvature c, shoulder width W, profile p
 uniform float u_base;       // slab under the relief, px of extra travel
 uniform vec3 u_ior;         // refractive index for R, G, B
-uniform float u_refraction; // 1 on, 0 off (ablation)
+uniform float u_refraction; // strength, 0 when refraction is switched off (ablation)
 uniform vec3 u_weights;     // direct, fine, wide, normalized
 uniform vec2 u_sigma;       // fine, wide kernel sigma, px
 uniform vec4 u_tint;        // body colour, alpha
@@ -24,7 +24,8 @@ uniform float u_f0;         // normal-incidence reflectance of the green index
 uniform float u_rim;        // Fresnel rim opacity
 uniform vec3 u_hv;          // Blinn-Phong half vector
 uniform float u_shininess;
-uniform float u_spec;       // highlight intensity
+uniform float u_spec;       // highlight intensity (strength applied)
+uniform float u_reflection; // environment reflection (strength applied)
 uniform int u_mode;         // 0 render; 1 debug: (q_r, q_g); 2 debug: (q_b, coverage, height)
 
 out vec4 o;
@@ -130,6 +131,8 @@ void main() {
     vec3 nrm = vec3(n * hs.y / nl, 1.0 / nl);
     float fres = u_f0 + (1.0 - u_f0) * pow(1.0 - nrm.z, 5.0);
     col *= 1.0 - clamp(fres * u_rim, 0.0, 1.0);
+    float refl = clamp(fres * u_reflection, 0.0, 1.0);
+    col = col * (1.0 - refl) + refl;
     float nh = max(dot(nrm, u_hv), 0.0);
     float spec = clamp(pow(nh, u_shininess) * min(0.25 + 0.75 * fres / max(u_f0, 1e-3), 4.0) * u_spec, 0.0, 1.0);
     col = col * (1.0 - spec) + spec;
