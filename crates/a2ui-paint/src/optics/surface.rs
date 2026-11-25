@@ -176,6 +176,25 @@ pub struct Effective {
     pub wide_sigma: f32,
 }
 
+/// Which shading terms [`Surface::shade_over`] applies. `ALL` is what every backend draws;
+/// a term switched off is a control for the parity check (it must then disagree).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Photometry {
+    pub tint: bool,
+    pub rim: bool,
+    pub reflection: bool,
+    pub highlight: bool,
+}
+
+impl Photometry {
+    pub const ALL: Photometry = Photometry {
+        tint: true,
+        rim: true,
+        reflection: true,
+        highlight: true,
+    };
+}
+
 /// A complete optical surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Surface {
@@ -617,6 +636,51 @@ impl Surface {
         }
     }
 
+    /// Photometric reference: the colour this surface draws over a page of one uniform
+    /// colour `bg` (0..1, per channel), premultiplied by coverage, as `[r, g, b, a]`.
+    ///
+    /// Over a uniform page, refraction and the scattering kernels cannot change the value
+    /// (every sample is `bg`, and the normalized weights sum to one), so this isolates the
+    /// shading terms of spec steps 4–5: tint, Fresnel rim, environment reflection and the
+    /// key-light highlight, in the shader's order. `terms` switches them for controls.
+    /// Geometry (where the samples land) is checked separately, by [`Self::sample_points`]
+    /// and [`Self::coverage`].
+    #[must_use]
+    pub fn shade_over(&self, p: [f32; 2], bg: [f32; 3], terms: Photometry) -> [f32; 4] {
+        let s = self.sanitized();
+        let a = s.coverage(p);
+        if a <= 0.0 {
+            return [0.0; 4];
+        }
+        let eff = s.effective();
+        let sp = s.point(p);
+        let mut col = bg;
+        if terms.tint {
+            let ta = eff.tint_alpha;
+            for (c, t) in col.iter_mut().zip(s.tint.rgb) {
+                *c = *c * (1.0 - ta) + f32::from(t) / 255.0 * ta;
+            }
+        }
+        let (fres, spec) = shade(&sp, s.f0(), half_vector(&s.light), &eff.light);
+        let rim = if terms.rim {
+            (fres * eff.light.rim).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let refl = if terms.reflection {
+            (fres * eff.reflection).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let spec = if terms.highlight { spec } else { 0.0 };
+        for c in &mut col {
+            *c *= 1.0 - rim;
+            *c = *c * (1.0 - refl) + refl;
+            *c = *c * (1.0 - spec) + spec;
+        }
+        [col[0] * a, col[1] * a, col[2] * a, a]
+    }
+
     /// The light, rim, reflection, tint and scattering widths at this strength: what every
     /// backend draws (offsets already carry the strength, see [`Self::offsets`]).
     #[must_use]
@@ -838,6 +902,62 @@ mod tests {
 
     fn droplet() -> Surface {
         Surface::preset("droplet").unwrap()
+    }
+
+    /// Over a uniform page with every term off, the surface draws the page colour times its
+    /// coverage; each term then moves the colour only where it acts.
+    #[test]
+    fn shade_over_isolates_the_shading_terms() {
+        let s = Surface::preset("aqua").unwrap();
+        let bg = [0.2, 0.4, 0.6];
+        let none = Photometry {
+            tint: false,
+            rim: false,
+            reflection: false,
+            highlight: false,
+        };
+        for p in [[0.0, 0.0], [150.0, 0.0], [159.0, 90.0], [400.0, 0.0]] {
+            let a = s.coverage(p);
+            let c = s.shade_over(p, bg, none);
+            for k in 0..3 {
+                assert!(
+                    (c[k] - bg[k] * a).abs() < 1e-6,
+                    "{p:?} {k}: {} vs {}",
+                    c[k],
+                    bg[k] * a
+                );
+            }
+            assert_eq!(c[3], a);
+        }
+        // outside the footprint nothing is drawn, whatever the terms
+        assert_eq!(s.shade_over([400.0, 0.0], bg, Photometry::ALL), [0.0; 4]);
+        // the tint pulls toward the tint colour at the centre
+        let tinted = s.shade_over([0.0, 0.0], bg, Photometry { tint: true, ..none });
+        assert_ne!(tinted, s.shade_over([0.0, 0.0], bg, none));
+        // the reflection lightens the aqua card's shoulder, where Fresnel is high (aqua has
+        // no rim); the droplet's rim darkens its edge
+        let edge = [158.0, 0.0];
+        let base = s.shade_over(edge, bg, none);
+        let refl = s.shade_over(
+            edge,
+            bg,
+            Photometry {
+                reflection: true,
+                ..none
+            },
+        );
+        assert!(refl[0] > base[0], "reflection {refl:?} vs {base:?}");
+        let d = droplet();
+        let edge = [88.0, 0.0];
+        let base = d.shade_over(edge, bg, none);
+        let rim = d.shade_over(edge, bg, Photometry { rim: true, ..none });
+        assert!(rim[0] < base[0], "rim {rim:?} vs {base:?}");
+        // strength 0 leaves the page colour: every term is weighted by the strength
+        let plain = Surface { strength: 0.0, ..s };
+        let c = plain.shade_over([0.0, 0.0], bg, Photometry::ALL);
+        for k in 0..3 {
+            assert!((c[k] - bg[k]).abs() < 1e-6);
+        }
     }
 
     /// The droplet preset is a spherical cap: same height and slope as the closed form.

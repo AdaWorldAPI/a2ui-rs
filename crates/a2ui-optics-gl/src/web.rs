@@ -1,6 +1,6 @@
 //! Raw WebGL2 driver for an optical surface (wasm32 only).
 
-use a2ui_paint::optics::surface::{ErrorStats, Surface};
+use a2ui_paint::optics::surface::{ErrorStats, Photometry, Surface};
 use wasm_bindgen::prelude::*;
 use web_sys::{
     HtmlCanvasElement, WebGl2RenderingContext as Gl, WebGlProgram, WebGlShader, WebGlTexture,
@@ -295,10 +295,16 @@ impl SurfaceRenderer {
         now() - t0
     }
 
-    /// GPU-vs-CPU parity of the current surface. Two checks, returned as JSON text:
+    /// GPU-vs-CPU parity of the current surface, returned as JSON text in two halves that
+    /// are judged separately: `geometry` (where the samples land and how much of the pixel
+    /// the surface covers) and `photometric` (what colour the shading terms produce). A
+    /// geometry error moves the picture; a photometric error changes its tone; neither can
+    /// hide the other.
     ///
     /// Each part reports `gl_error` (must be 0: a refused draw reads back zeros) and the
-    /// float part `nonzero`, so a silent failure cannot pass as agreement.
+    /// float parts `nonzero`, so a silent failure cannot pass as agreement.
+    ///
+    /// Geometry:
     ///
     /// * `float`: the shader's own sample positions and coverage (debug modes, RGBA32F
     ///   target) against `Surface::sample_points` / `Surface::coverage`, at full size.
@@ -310,12 +316,168 @@ impl SurfaceRenderer {
     ///   disagreements, `mismatch` larger ones; `control` the disagreements with a CPU
     ///   reference without dispersion (non-zero when dispersion is on, or the check cannot see
     ///   per-channel errors).
+    ///
+    /// Photometric:
+    ///
+    /// * over a page of one uniform colour, where refraction and the scattering kernels
+    ///   cannot change the value, the real shading path (mode 0, RGBA32F) against
+    ///   `Surface::shade_over`: tint, Fresnel rim, reflection and highlight. Errors in 1/255
+    ///   per channel over the interior and the edge. `controls` repeats the comparison with
+    ///   one term left out of the CPU reference: a term the surface uses must then disagree
+    ///   clearly, which proves the check can see it (`null` for a term the surface does not
+    ///   use).
     pub fn parity(&mut self) -> Result<String, JsValue> {
         let float = self.parity_float()?;
         let texel = self.parity_texel()?;
+        let photometric = self.parity_photometric()?;
         let gl = &self.gl;
         gl.bind_framebuffer(Gl::FRAMEBUFFER, None);
-        Ok(format!("{{\"float\":{float},\"texel\":{texel}}}"))
+        Ok(format!(
+            "{{\"geometry\":{{\"float\":{float},\"texel\":{texel}}},\"photometric\":{photometric}}}"
+        ))
+    }
+
+    fn parity_photometric(&self) -> Result<String, JsValue> {
+        // one uniform page colour, exactly representable in 8 bits
+        const BG: [u8; 3] = [40, 96, 168];
+        let gl = &self.gl;
+        if gl
+            .get_extension("EXT_color_buffer_float")
+            .ok()
+            .flatten()
+            .is_none()
+        {
+            return Ok("{\"error\":\"EXT_color_buffer_float unavailable\"}".into());
+        }
+        let s = self.surface;
+        let (w, h) = canvas_size(&s);
+        let (wi, hi) = (w as usize, h as usize);
+        let center = [w as f32 / 2.0, h as f32 / 2.0];
+        let page = texture(gl, Gl::NEAREST, Gl::NEAREST)?;
+        let px: Vec<u8> = (0..16).flat_map(|_| [BG[0], BG[1], BG[2], 255]).collect();
+        gl.tex_image_2d_with_i32_and_i32_and_i32_and_format_and_type_and_opt_u8_array(
+            Gl::TEXTURE_2D,
+            0,
+            Gl::RGBA8 as i32,
+            4,
+            4,
+            0,
+            Gl::RGBA,
+            Gl::UNSIGNED_BYTE,
+            Some(&px),
+        )?;
+        let (fb, t) = self.target(Gl::RGBA32F, w as i32, h as i32)?;
+        gl.bind_texture(Gl::TEXTURE_2D, Some(&page));
+        let u = SurfaceUniforms::new(&s, self.terms);
+        self.draw(&u, [4.0, 4.0], [w, h], [0.0, 0.0], center, 0);
+        let gl_error = gl.get_error();
+        let buf = js_sys::Float32Array::new_with_length((wi * hi * 4) as u32);
+        gl.read_pixels_with_opt_array_buffer_view(
+            0,
+            0,
+            w as i32,
+            h as i32,
+            Gl::RGBA,
+            Gl::FLOAT,
+            Some(&buf),
+        )?;
+        let got = buf.to_vec();
+        gl.bind_framebuffer(Gl::FRAMEBUFFER, None);
+        gl.delete_framebuffer(Some(&fb));
+        gl.delete_texture(Some(&t));
+        gl.delete_texture(Some(&page));
+        let nonzero = got.iter().filter(|v| **v != 0.0).count();
+
+        // the terms the shader draws: tint always, the rim with the rim switch, reflection
+        // and highlight with the highlight switch (SurfaceUniforms::new)
+        let all = Photometry {
+            tint: true,
+            rim: self.terms[1],
+            reflection: self.terms[2],
+            highlight: self.terms[2],
+        };
+        let bg = BG.map(|c| f32::from(c) / 255.0);
+        let eff = s.sanitized().effective();
+        let used = [
+            (
+                "tint",
+                eff.tint_alpha > 0.0,
+                Photometry { tint: false, ..all },
+            ),
+            (
+                "rim",
+                all.rim && eff.light.rim > 0.0,
+                Photometry { rim: false, ..all },
+            ),
+            (
+                "reflection",
+                all.reflection && eff.reflection > 0.0,
+                Photometry {
+                    reflection: false,
+                    ..all
+                },
+            ),
+            (
+                "highlight",
+                all.highlight && eff.light.intensity > 0.0,
+                Photometry {
+                    highlight: false,
+                    ..all
+                },
+            ),
+        ];
+        let mut interior: [Vec<f32>; 3] = Default::default();
+        let mut edge = Vec::new();
+        let mut control = [0.0f32; 4];
+        let mut leak = 0usize;
+        for row in 0..hi {
+            let y = hi - 1 - row; // readback rows are bottom-up
+            for x in 0..wi {
+                let i = (row * wi + x) * 4;
+                let p = [x as f32 + 0.5 - center[0], y as f32 + 0.5 - center[1]];
+                let want = s.shade_over(p, bg, all);
+                if want[3] == 0.0 {
+                    if got[i + 3] != 0.0 {
+                        leak += 1;
+                    }
+                    continue;
+                }
+                let e = |w: [f32; 4], c: usize| (got[i + c] - w[c]).abs() * 255.0;
+                if want[3] >= 1.0 {
+                    for (c, v) in interior.iter_mut().enumerate() {
+                        v.push(e(want, c));
+                    }
+                    for (k, (_, on, without)) in used.iter().enumerate() {
+                        if *on {
+                            let o = s.shade_over(p, bg, *without);
+                            control[k] = control[k].max(e(o, 0).max(e(o, 1)).max(e(o, 2)));
+                        }
+                    }
+                } else {
+                    edge.push((0..4).map(|c| e(want, c)).fold(0.0, f32::max));
+                }
+            }
+        }
+        let [r, g, b] = interior.map(|mut v| stats_json(&ErrorStats::of(&mut v)));
+        let controls = used
+            .iter()
+            .zip(control)
+            .map(|((name, on, _), m)| {
+                if *on {
+                    format!("\"{name}\":{m:.3}")
+                } else {
+                    format!("\"{name}\":null")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        Ok(format!(
+            "{{\"gl_error\":{gl_error},\"nonzero\":{nonzero},\"bg\":[{},{},{}],\"unit\":\"1/255\",\"interior\":{{\"r\":{r},\"g\":{g},\"b\":{b}}},\"edge\":{},\"leak\":{leak},\"controls\":{{{controls}}}}}",
+            BG[0],
+            BG[1],
+            BG[2],
+            stats_json(&ErrorStats::of(&mut edge))
+        ))
     }
 
     fn target(
