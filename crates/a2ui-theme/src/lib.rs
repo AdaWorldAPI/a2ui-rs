@@ -6,6 +6,9 @@
 //! CSS ([`brand`]), and the files a theme links ([`asset`]: the Holo Glass material, the
 //! rail pictures, the fonts).
 //!
+//! Materials (how surfaces meet light) and the viewer's atmosphere (their own light) are
+//! separate choices in [`material`]; no theme implies a material or a colour of light.
+//!
 //! The operator's name and logo are not part of any theme. They are not fit for a public
 //! repository, so they come from the environment at runtime ([`Identity`]); every app
 //! keeps its own variable names for them.
@@ -14,6 +17,9 @@
 /// [`THEMES`], with custom properties (`--bg`, `--fg`, `--accent`, …) and the few
 /// component rules a theme adds.
 pub const THEMES_CSS: &str = include_str!("../assets/themes.css");
+
+pub mod material;
+pub use material::{AMBIENTS, Ambient, Atmosphere, MATERIALS, MaterialInfo, Rendering, material};
 
 /// The Holo Glass material, linked only while the `holo-glass` theme is in force. It
 /// refers to its pictures relative to itself (`../assets/…`), so serve it under

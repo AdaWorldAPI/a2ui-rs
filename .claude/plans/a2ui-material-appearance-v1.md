@@ -264,6 +264,52 @@ optional ndarray feature for map generation is not added: the measured cost is 5
 420 × 200 map in a debug build (reported, not a gate), and a release measurement decides
 whether vectorizing is worth the dependency.
 
+**Step A, review of #63, release timing (2026-11-25).** Operator: step A and the timing run
+independently of G1; G1 stays open; C and D wait for G1.
+
+- *Step A landed:* `a2ui_theme::material` holds the material registry (`MATERIALS`, `material()`,
+  `Rendering::{None, Stylesheet, Optical}`), the ambient presets (`AMBIENTS`) and the viewer's
+  `Atmosphere` (port of report-rs `Aqua`: clamping, restrained glare, `key`/`parse`, `--atmo-*`
+  CSS projection, `same_except_colour`). Identity, theme, material and atmosphere are separate
+  types; no theme names a material or a light colour. No optics in `a2ui-theme`. report-rs-only
+  materials (elevation, frosted, Holo V2/V3) join the registry when their assets move.
+- *Independent review of #63 (merged without review):* three bugs fixed (the rear map was
+  rendered at the glass size; the map route computed both glass maps per request on the async
+  runtime without a limit; the page leaked blob URLs and ignored HTTP errors), and the weak gate
+  tests replaced: G2 now at the HTTP layer, G3 gains a continuity test (strength 10⁻³ within one
+  8-bit step of neutral), G5 checks both directions at five sizes, non-finite inputs are
+  sanitized. Each new guard is disable-verified. Known and kept: the medial-axis seam when the
+  bevel is wider than the corner radius (same as the prototype).
+- *G3 in the browser:* the body tint did not scale with strength, so 0 % was dimmed, not plain;
+  it is now `FilterParams::tint_alpha` (measured: at 0 % the checker step inside the glass equals
+  the step outside, 98 of 98 levels).
+- *Invalidation:* the displacement map does not depend on colour, light direction, rim or
+  strength; the rim map does not depend on colour; only the rear field carries colour. The lab
+  keys each resource by its own inputs: a hue change fetches the rear field only (measured in the
+  browser).
+- *Release timing* (`cargo run --release -p a2ui-paint --features optics-png --example
+  optics_timing`, 4 cores, median of 41; reported, not gates):
+
+  | size | displacement | rim | rear (½ res) | PNG disp / rim / rear | all, uncached | cache hit |
+  |---|---|---|---|---|---|---|
+  | 120×56 | 121 µs | 319 µs | 161 µs | 648 / 207 / 1 262 µs | 2.9 ms | 0.1 µs |
+  | 420×200 | 826 µs | 1 733 µs | 1 166 µs | 1 319 / 920 / 4 101 µs | 10.7 ms | 0.1 µs |
+  | 900×560 | 3.6 ms | 5.9 ms | 6.8 ms | 5.4 / 5.2 / 13.3 ms | 45 ms | 0.1 µs |
+
+  One allocation per map (exactly w·h·4 bytes); PNG encoding about 16 allocations and 0.35 MiB
+  peak. Browser composition in headless Chromium stays at the 16.7 ms frame interval with and
+  without the lens filter (software rendering; the method cannot resolve below one frame).
+- *ndarray decision:* not now. PNG encoding costs as much as the arithmetic (the rear field
+  most), and the per-pixel loops recompute what the cross-section could tabulate once (the rim's
+  slope, tilt and Fresnel term are functions of the bevel position alone; the rear lobe is
+  separable into a row and a column factor). Those algorithmic changes come first; SIMD is
+  revisited only if a tabulated scalar version is still too slow.
+- *Dispersion:* researched, not implemented (`.claude/plans/a2ui-optics-dispersion-note.md`):
+  with an Abbe number the red–blue split is 0.13 px for crown glass and 0.38 px for dense flint
+  at this geometry, about one step of the 8-bit map. Physically correct dispersion is almost
+  invisible at UI scale; a visible fringe needs an exaggerated Abbe number and must be labelled
+  as such. Proposed API: `Glass { abbe: Option<f32> }`, `None` bit-identical to today.
+
 ## 10. Non-goals
 
 - No production integration before G1.

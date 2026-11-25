@@ -62,7 +62,9 @@ impl Profile {
         }
     }
 
-    /// Slope `dh/dx` by central difference (one-sided at the ends).
+    /// Slope `dh/dx` by central difference. At the ends the difference is taken over the
+    /// half-width step inside `[0, 1]` and still divided by the full width, so it is half the
+    /// true slope there (the prototype's convention, kept for parity).
     #[must_use]
     pub fn slope(self, x: f32) -> f32 {
         let dx = 1e-3;
@@ -109,6 +111,9 @@ pub struct Glass {
     pub spec_exp: f32,
     /// Peak opacity of the specular rim, `[0, 1]`.
     pub spec_opacity: f32,
+    /// Opacity of the glass body's neutral tint (grey 241), `[0, 1]`. Scaled by strength
+    /// like every other term, so strength 0 shows no tint.
+    pub tint: f32,
     /// Effect strength, `[0, 1]`. Scales every optical term; 0 is plain glass.
     pub strength: f32,
 }
@@ -129,6 +134,7 @@ impl Glass {
         light_angle_deg: -110.0,
         spec_exp: 6.0,
         spec_opacity: 0.35,
+        tint: 0.565,
         strength: 1.0,
     };
 
@@ -138,8 +144,30 @@ impl Glass {
         ((self.ior - 1.0) / (self.ior + 1.0)).powi(2)
     }
 
-    fn strength(&self) -> f32 {
-        self.strength.clamp(0.0, 1.0)
+    /// This glass with every non-finite value replaced by the default's, so a NaN or an
+    /// infinity from a caller can never reach the maps (a NaN cast to `u8` is 0, which would
+    /// read as maximum displacement).
+    #[must_use]
+    pub fn sanitized(self) -> Self {
+        let d = Self::DEFAULT;
+        let f = |v: f32, dv: f32| if v.is_finite() { v } else { dv };
+        Self {
+            radius: f(self.radius, d.radius),
+            bezel: f(self.bezel, d.bezel),
+            thickness: f(self.thickness, d.thickness),
+            depth: f(self.depth, d.depth),
+            ior: f(self.ior, d.ior),
+            profile: self.profile,
+            refraction: f(self.refraction, d.refraction),
+            fine_sigma: f(self.fine_sigma, d.fine_sigma),
+            wide_sigma: f(self.wide_sigma, d.wide_sigma),
+            fine_share: f(self.fine_share, d.fine_share),
+            light_angle_deg: f(self.light_angle_deg, d.light_angle_deg),
+            spec_exp: f(self.spec_exp, d.spec_exp),
+            spec_opacity: f(self.spec_opacity, d.spec_opacity),
+            tint: f(self.tint, d.tint),
+            strength: f(self.strength, 0.0),
+        }
     }
 
     /// Lateral displacement (px) of a perpendicular ray entering at normalized bevel
@@ -148,6 +176,52 @@ impl Glass {
     /// the flat face and on total internal reflection.
     #[must_use]
     pub fn displacement(&self, x: f32) -> f32 {
+        self.sanitized().displacement_inner(x)
+    }
+
+    /// The one cross-section, reused around the shape.
+    #[must_use]
+    pub fn cross_section(&self) -> CrossSection {
+        self.sanitized().cross_section_inner()
+    }
+
+    /// The filter parameters for this glass at its strength, given the cross-section's
+    /// maximum. At strength 0 every value is the identity.
+    #[must_use]
+    pub fn filter_params(&self, max_displacement: f32) -> FilterParams {
+        let max = if max_displacement.is_finite() {
+            max_displacement
+        } else {
+            0.0
+        };
+        self.sanitized().filter_params_inner(max)
+    }
+
+    /// The displacement map alone. It depends on the shape, the profile, the thickness, the
+    /// depth and the index only: not on colour, light direction, rim or scattering, and on
+    /// strength only in that strength 0 gives the neutral map (the filter scale carries the
+    /// strength otherwise). A renderer can therefore keep it cached across those changes.
+    #[must_use]
+    pub fn render_displacement(&self, width: u32, height: u32, cs: &CrossSection) -> Vec<u8> {
+        self.sanitized()
+            .render_displacement_inner(width, height, cs)
+    }
+
+    /// The specular rim alone: white, intensity in alpha. Depends on the shape, the profile,
+    /// the index, the light direction, the rim exponent and opacity and the strength; not on
+    /// colour.
+    #[must_use]
+    pub fn render_specular(&self, width: u32, height: u32) -> Vec<u8> {
+        self.sanitized().render_specular_inner(width, height)
+    }
+
+    fn strength(&self) -> f32 {
+        self.strength.clamp(0.0, 1.0)
+    }
+
+    /// The body of [`Self::displacement`]; expects a sanitized glass.
+    #[must_use]
+    fn displacement_inner(&self, x: f32) -> f32 {
         let bezel = self.bezel.max(1e-3);
         let h = self.profile.height(x);
         // slope of the surface along the outward direction, in px/px
@@ -169,59 +243,103 @@ impl Glass {
         tx / tz.abs() * travel
     }
 
-    /// The one cross-section, reused around the shape.
+    /// The body of [`Self::cross_section`]; expects a sanitized glass.
     #[must_use]
-    pub fn cross_section(&self) -> CrossSection {
+    fn cross_section_inner(&self) -> CrossSection {
         let mut samples = [0.0f32; CROSS_SECTION_SAMPLES + 1];
         let mut max = 0.0f32;
         for (i, s) in samples.iter_mut().enumerate() {
-            *s = self.displacement(i as f32 / CROSS_SECTION_SAMPLES as f32);
+            *s = self.displacement_inner(i as f32 / CROSS_SECTION_SAMPLES as f32);
             max = max.max(s.abs());
         }
         CrossSection { samples, max }
     }
 
-    /// The filter parameters for this glass at its strength, given the cross-section's
-    /// maximum. At strength 0 every value is the identity.
+    /// The body of [`Self::filter_params`]; expects a sanitized glass.
     #[must_use]
-    pub fn filter_params(&self, max_displacement: f32) -> FilterParams {
+    fn filter_params_inner(&self, max_displacement: f32) -> FilterParams {
         let s = self.strength();
         FilterParams {
             displacement_scale: 2.0 * max_displacement * self.refraction.max(0.0) * s,
             fine_sigma: self.fine_sigma.max(0.0) * s,
             wide_sigma: self.wide_sigma.max(0.0) * s,
             fine_share: self.fine_share.clamp(0.0, 1.0),
+            tint_alpha: self.tint.clamp(0.0, 1.0) * s,
         }
     }
 
     /// Displacement and specular maps for a `width × height` element.
     #[must_use]
     pub fn render(&self, width: u32, height: u32) -> GlassMaps {
-        let (w, h) = (width as usize, height as usize);
-        let mut displacement = vec![0u8; w * h * 4];
-        for px in displacement.as_chunks_mut::<4>().0 {
-            px.copy_from_slice(&NEUTRAL_DISPLACEMENT);
+        let g = self.sanitized();
+        let cs = g.cross_section_inner();
+        GlassMaps {
+            width,
+            height,
+            displacement: g.render_displacement_inner(width, height, &cs),
+            specular: g.render_specular_inner(width, height),
+            max_displacement: cs.max,
         }
-        let mut specular = vec![0u8; w * h * 4];
-        let cs = self.cross_section();
-        let s = self.strength();
-        if s == 0.0 || w == 0 || h == 0 {
-            return GlassMaps {
-                width,
-                height,
-                displacement,
-                specular,
-                max_displacement: cs.max,
+    }
+
+    /// The body of [`Self::render_displacement`]; expects a sanitized glass.
+    #[must_use]
+    fn render_displacement_inner(&self, width: u32, height: u32, cs: &CrossSection) -> Vec<u8> {
+        let mut map = NEUTRAL_DISPLACEMENT.repeat(width as usize * height as usize);
+        if self.strength() == 0.0 {
+            return map;
+        }
+        self.for_each_bevel_pixel(width, height, |i, e, xb| {
+            let idx = (xb * CROSS_SECTION_SAMPLES as f32).round() as usize;
+            let m = if cs.max > 0.0 {
+                cs.samples[idx] / cs.max
+            } else {
+                0.0
             };
+            map[i] = (128.0 + 127.0 * m * e.nx).round() as u8;
+            map[i + 1] = (128.0 + 127.0 * m * e.ny).round() as u8;
+        });
+        map
+    }
+
+    /// The body of [`Self::render_specular`]; expects a sanitized glass.
+    #[must_use]
+    fn render_specular_inner(&self, width: u32, height: u32) -> Vec<u8> {
+        let mut map = vec![0u8; width as usize * height as usize * 4];
+        let s = self.strength();
+        if s == 0.0 {
+            return map;
         }
-        let (wf, hf) = (width as f32, height as f32);
-        let r = self.radius.min(wf / 2.0).min(hf / 2.0).max(0.0);
-        let bezel = self.bezel.max(1e-3);
         let la = self.light_angle_deg.to_radians();
         let (lx, ly) = (la.cos(), la.sin());
         let f0 = self.f0();
         let norm = f0 + (1.0 - f0) * 0.03; // authored normalisation of the rim weight
-        let slope_scale = self.thickness / bezel;
+        let slope_scale = self.thickness / self.bezel.max(1e-3);
+        self.for_each_bevel_pixel(width, height, |i, e, xb| {
+            let tilt = (self.profile.slope(xb) * slope_scale).atan();
+            let facing = (e.nx * lx + e.ny * ly).max(0.0);
+            let fres = f0 + (1.0 - f0) * (1.0 - tilt.cos()).powi(5);
+            let rim = facing.powf(self.spec_exp) * tilt.sin() * (0.35 + 0.65 * fres / norm);
+            let a = (rim * self.spec_opacity * s).clamp(0.0, 1.0);
+            map[i..i + 4].copy_from_slice(&[255, 255, 255, (a * 255.0).round() as u8]);
+        });
+        map
+    }
+
+    /// Visit every pixel inside the bevel band: `f(byte index, edge sample, bevel position)`.
+    fn for_each_bevel_pixel(
+        &self,
+        width: u32,
+        height: u32,
+        mut f: impl FnMut(usize, EdgeSample, f32),
+    ) {
+        let (w, h) = (width as usize, height as usize);
+        if w == 0 || h == 0 {
+            return;
+        }
+        let (wf, hf) = (width as f32, height as f32);
+        let r = self.radius.min(wf / 2.0).min(hf / 2.0).max(0.0);
+        let bezel = self.bezel.max(1e-3);
         for y in 0..h {
             for x in 0..w {
                 let cx = x as f32 + 0.5 - wf / 2.0;
@@ -230,32 +348,10 @@ impl Glass {
                     continue;
                 };
                 let xb = e.depth / bezel;
-                if xb >= 1.0 {
-                    continue;
+                if xb < 1.0 {
+                    f((y * w + x) * 4, e, xb);
                 }
-                let i = (y * w + x) * 4;
-                let idx = (xb * CROSS_SECTION_SAMPLES as f32).round() as usize;
-                let m = if cs.max > 0.0 {
-                    cs.samples[idx] / cs.max
-                } else {
-                    0.0
-                };
-                displacement[i] = (128.0 + 127.0 * m * e.nx).round() as u8;
-                displacement[i + 1] = (128.0 + 127.0 * m * e.ny).round() as u8;
-                let tilt = (self.profile.slope(xb) * slope_scale).atan();
-                let facing = (e.nx * lx + e.ny * ly).max(0.0);
-                let fres = f0 + (1.0 - f0) * (1.0 - tilt.cos()).powi(5);
-                let rim = facing.powf(self.spec_exp) * tilt.sin() * (0.35 + 0.65 * fres / norm);
-                let a = (rim * self.spec_opacity * s).clamp(0.0, 1.0);
-                specular[i..i + 4].copy_from_slice(&[255, 255, 255, (a * 255.0).round() as u8]);
             }
-        }
-        GlassMaps {
-            width,
-            height,
-            displacement,
-            specular,
-            max_displacement: cs.max,
         }
     }
 }
@@ -289,6 +385,8 @@ pub struct FilterParams {
     pub wide_sigma: f32,
     /// Weight of the fine kernel; the wide kernel gets `1 − fine_share`.
     pub fine_share: f32,
+    /// Opacity of the neutral body tint at this strength.
+    pub tint_alpha: f32,
 }
 
 /// The rendered maps of one element, RGBA8, row-major.
@@ -341,6 +439,9 @@ pub fn rounded_rect(cx: f32, cy: f32, w: f32, h: f32, r: f32) -> Option<EdgeSamp
     Some(EdgeSample { depth: -sd, nx, ny })
 }
 
+/// The smallest rear-light box edge (px) that is drawn; smaller boxes stay transparent.
+pub const REAR_MIN_EDGE: usize = 32;
+
 /// The coloured light behind an active surface. The only place colour enters the material.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RearLight {
@@ -359,10 +460,17 @@ pub struct RearLight {
 pub fn rear_field(width: u32, height: u32, light: RearLight, strength: f32) -> Vec<u8> {
     let (w, h) = (width as usize, height as usize);
     let mut out = vec![0u8; w * h * 4];
-    let s = strength.clamp(0.0, 1.0) * light.halo.clamp(0.0, 1.0);
-    if s == 0.0 || w < 3 || h < 3 {
+    let finite = |v: f32| if v.is_finite() { v } else { 0.0 };
+    let s = finite(strength).clamp(0.0, 1.0) * finite(light.halo).clamp(0.0, 1.0);
+    // Below this size the field cannot fade to zero without a visible step, so it is not drawn.
+    if s == 0.0 || w < REAR_MIN_EDGE || h < REAR_MIN_EDGE {
         return out;
     }
+    let light = RearLight {
+        hue: finite(light.hue),
+        sat: finite(light.sat),
+        halo: light.halo,
+    };
     let sat = light.sat.clamp(0.0, 1.0);
     let rgb = hsl(light.hue, sat, 0.62 + (1.0 - sat) * 0.32);
     // authored: the light sits behind the lower left, a wide soft lobe
@@ -400,9 +508,13 @@ pub fn hsl(h: f32, s: f32, l: f32) -> [u8; 3] {
     [f(0.0), f(8.0), f(4.0)].map(|c| (c * 255.0).round().clamp(0.0, 255.0) as u8)
 }
 
+/// The error of [`png_rgba`].
+#[cfg(feature = "optics-png")]
+pub type PngError = png::EncodingError;
+
 /// Encode an RGBA8 buffer as PNG.
 #[cfg(feature = "optics-png")]
-pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, png::EncodingError> {
+pub fn png_rgba(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, PngError> {
     let mut out = Vec::new();
     {
         let mut enc = png::Encoder::new(&mut out, width, height);
@@ -536,8 +648,13 @@ mod tests {
         }
         .filter_params(off.max_displacement);
         assert_eq!(
-            (p.displacement_scale, p.fine_sigma, p.wide_sigma),
-            (0.0, 0.0, 0.0)
+            (
+                p.displacement_scale,
+                p.fine_sigma,
+                p.wide_sigma,
+                p.tint_alpha
+            ),
+            (0.0, 0.0, 0.0, 0.0)
         );
         let light = RearLight {
             hue: 352.0,
@@ -597,43 +714,130 @@ mod tests {
     }
 
     /// G5: the rear field ends inside its own box: every border pixel is transparent, the
-    /// field is visible inside, and it fades without a step.
+    /// field is visible inside, and it fades without a step in either direction. Checked at
+    /// the smallest drawn size and at the sizes the lab uses (a control's rear box is about
+    /// 200 px, a panel's about 1600 px).
     #[test]
     fn the_rear_field_has_no_silhouette() {
-        let (w, h) = (300usize, 180usize);
-        let f = rear_field(
-            w as u32,
-            h as u32,
+        let light = RearLight {
+            hue: 212.0,
+            sat: 0.8,
+            halo: 1.0,
+        };
+        for (w, h) in [
+            (REAR_MIN_EDGE, REAR_MIN_EDGE),
+            (202, 186),
+            (300, 180),
+            (740, 520),
+            (1600, 1300),
+        ] {
+            let f = rear_field(w as u32, h as u32, light, 1.0);
+            let a = |x: usize, y: usize| f[(y * w + x) * 4 + 3];
+            for x in 0..w {
+                assert_eq!(
+                    (a(x, 0), a(x, h - 1)),
+                    (0, 0),
+                    "{w}x{h}: top/bottom border at x = {x}"
+                );
+            }
+            for y in 0..h {
+                assert_eq!(
+                    (a(0, y), a(w - 1, y)),
+                    (0, 0),
+                    "{w}x{h}: left/right border at y = {y}"
+                );
+            }
+            assert!(
+                a(w * 3 / 10, h * 7 / 10) > 60,
+                "{w}x{h}: the field is visible inside"
+            );
+            if w.min(h) < 150 {
+                continue; // a box this small cannot fade within 8 levels per pixel
+            }
+            let mut max_step = 0;
+            for y in 0..h {
+                for x in 0..w {
+                    if x > 0 {
+                        max_step = max_step.max(a(x, y).abs_diff(a(x - 1, y)));
+                    }
+                    if y > 0 {
+                        max_step = max_step.max(a(x, y).abs_diff(a(x, y - 1)));
+                    }
+                }
+            }
+            assert!(max_step <= 8, "{w}x{h}: largest step {max_step}");
+        }
+        // below the minimum the field is not drawn at all, rather than drawn with an edge
+        assert!(rear_field(31, 200, light, 1.0).iter().all(|&b| b == 0));
+    }
+
+    /// G3 continuity: every term scales with strength, so a strength just above 0 is still
+    /// (within one 8-bit step) the neutral baseline. This catches a term that ignores
+    /// strength, which the strength-0 test alone cannot see behind its early return.
+    #[test]
+    fn a_tiny_strength_stays_within_one_step_of_neutral() {
+        let (w, h) = (240u32, 140u32);
+        let g = Glass {
+            strength: 1e-3,
+            ..Glass::DEFAULT
+        };
+        let spec = g.render_specular(w, h);
+        assert!(
+            spec.as_chunks::<4>().0.iter().all(|p| p[3] <= 1),
+            "rim ignores strength"
+        );
+        let rear = rear_field(
+            w + 200,
+            h + 200,
             RearLight {
-                hue: 212.0,
-                sat: 0.8,
+                hue: 352.0,
+                sat: 0.75,
                 halo: 1.0,
             },
-            1.0,
+            1e-3,
         );
-        let a = |x: usize, y: usize| f[(y * w + x) * 4 + 3];
-        for x in 0..w {
-            assert_eq!(
-                (a(x, 0), a(x, h - 1)),
-                (0, 0),
-                "top/bottom border at x = {x}"
-            );
-        }
-        for y in 0..h {
-            assert_eq!(
-                (a(0, y), a(w - 1, y)),
-                (0, 0),
-                "left/right border at y = {y}"
-            );
-        }
-        assert!(a(w / 3, h * 2 / 3) > 100, "the field is visible inside");
-        // no step: neighbouring pixels never jump by more than a few levels
-        let max_step = (0..h)
-            .flat_map(|y| (1..w).map(move |x| (y, x)))
-            .map(|(y, x)| a(x, y).abs_diff(a(x - 1, y)))
-            .max()
-            .unwrap();
-        assert!(max_step <= 8, "largest horizontal step {max_step}");
+        assert!(
+            rear.as_chunks::<4>().0.iter().all(|p| p[3] <= 1),
+            "rear ignores strength"
+        );
+        let p = g.filter_params(g.cross_section().max);
+        assert!(
+            p.displacement_scale < 0.1 && p.wide_sigma < 0.05 && p.tint_alpha < 0.001,
+            "{p:?}"
+        );
+        // and the same check fails at full strength
+        let full = Glass::DEFAULT.render_specular(w, h);
+        assert!(full.as_chunks::<4>().0.iter().any(|p| p[3] > 1));
+    }
+
+    /// Non-finite inputs never reach the maps: they take the default's value, and a NaN
+    /// strength is no effect.
+    #[test]
+    fn non_finite_values_never_reach_the_maps() {
+        let bad = Glass {
+            thickness: f32::NAN,
+            ior: f32::INFINITY,
+            ..Glass::DEFAULT
+        };
+        assert_eq!(bad.render(80, 60), Glass::DEFAULT.render(80, 60));
+        let nan_strength = Glass {
+            strength: f32::NAN,
+            ..Glass::DEFAULT
+        };
+        assert_eq!(
+            nan_strength.render(80, 60),
+            Glass {
+                strength: 0.0,
+                ..Glass::DEFAULT
+            }
+            .render(80, 60)
+        );
+        let light = RearLight {
+            hue: f32::NAN,
+            sat: f32::NAN,
+            halo: f32::NAN,
+        };
+        assert!(rear_field(100, 100, light, 1.0).iter().all(|&b| b == 0));
     }
 
     #[test]

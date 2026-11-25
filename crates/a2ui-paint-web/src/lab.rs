@@ -1,13 +1,20 @@
 //! The Material Laboratory: one glass element over calibration backgrounds, rendered from
-//! the maps [`a2ui_paint::optics`] computes. The page holds no optics of its own; every
-//! map is requested from `/lab/optics/map` and the filter parameters come back in response
-//! headers, so what is judged here is the Rust engine itself (plan
+//! the maps [`a2ui_paint::optics`] computes. The page holds no optics of its own: every map
+//! comes from `/lab/optics/map` and the filter parameters from `/lab/optics/params` (in
+//! response headers), so what is judged here is the Rust engine itself (plan
 //! `.claude/plans/a2ui-material-appearance-v1.md` §7, step B).
+//!
+//! Each request computes only the map it names, off the async runtime, at most
+//! [`CONCURRENT_RENDERS`] at a time. The page keys each map by the parameters that map depends
+//! on, so a colour change fetches only the rear light; the glass maps stay cached.
 //!
 //! Visual acceptance (gate G1) is the operator's and happens on this page; the unit tests
 //! of `a2ui_paint::optics` cover G2, G3 and G5.
 
+use std::sync::OnceLock;
 use std::time::Instant;
+
+use tokio::sync::Semaphore;
 
 use a2ui_paint::optics::{Glass, Profile, RearLight, png_rgba, rear_field};
 use axum::{
@@ -24,10 +31,19 @@ const PAGE: &str = include_str!("lab.html");
 /// Largest map edge the server renders, px.
 const MAX_EDGE: u32 = 1600;
 
+/// Maps computed at the same time; further requests wait.
+const CONCURRENT_RENDERS: usize = 2;
+
+fn permits() -> &'static Semaphore {
+    static P: OnceLock<Semaphore> = OnceLock::new();
+    P.get_or_init(|| Semaphore::new(CONCURRENT_RENDERS))
+}
+
 /// Add the laboratory routes.
 pub fn routes(app: Router) -> Router {
     app.route("/lab/optics", get(page))
         .route("/lab/optics/map", get(map))
+        .route("/lab/optics/params", get(params))
 }
 
 async fn page() -> Html<&'static str> {
@@ -90,6 +106,7 @@ impl MapQuery {
                 "fine" => g.fine_sigma = n().map_or(g.fine_sigma, |x| x.clamp(0.0, 20.0)),
                 "wide" => g.wide_sigma = n().map_or(g.wide_sigma, |x| x.clamp(0.0, 60.0)),
                 "share" => g.fine_share = n().map_or(g.fine_share, |x| x.clamp(0.0, 1.0)),
+                "tint" => g.tint = n().map_or(g.tint, |x| x.clamp(0.0, 1.0)),
                 "light" => {
                     g.light_angle_deg = n().map_or(g.light_angle_deg, |x| x.clamp(-360.0, 360.0))
                 }
@@ -108,38 +125,76 @@ impl MapQuery {
     }
 }
 
-/// One map as PNG. Headers carry what the filter needs (`x-a2ui-filter-*`) and how long
-/// the map took to compute (`x-a2ui-render-us`, the arithmetic only, not the encoding).
-async fn map(RawQuery(raw): RawQuery) -> Response {
+/// The filter parameters and the cross-section's maximum for a glass, in response headers.
+/// Cheap (one 129-sample cross-section), so the page fetches it on every change.
+async fn params(RawQuery(raw): RawQuery) -> Response {
     let q = MapQuery::parse(raw.as_deref().unwrap_or(""));
-    let t = Instant::now();
-    let (rgba, max) = match q.kind {
-        Kind::Displacement | Kind::Specular => {
-            let m = q.glass.render(q.width, q.height);
-            let buf = if q.kind == Kind::Displacement {
-                m.displacement
-            } else {
-                m.specular
-            };
-            (buf, m.max_displacement)
-        }
-        Kind::Rear => (rear_field(q.width, q.height, q.rear, q.glass.strength), 0.0),
-    };
-    let render_us = t.elapsed().as_micros();
-    let Ok(png) = png_rgba(q.width, q.height, &rgba) else {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "png encoding failed").into_response();
-    };
-    let p = q.glass.filter_params(max);
+    let max = q.glass.cross_section().max;
     let mut res = (
-        [
-            (header::CONTENT_TYPE, "image/png"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        png,
+        StatusCode::NO_CONTENT,
+        [(header::CACHE_CONTROL, "no-store")],
     )
         .into_response();
-    let h = res.headers_mut();
-    for (name, value) in [
+    set_headers(&mut res, filter_headers(&q.glass, max));
+    res
+}
+
+/// One map as PNG: only the map named by `kind`. `x-a2ui-render-us` is the arithmetic only,
+/// `x-a2ui-encode-us` the PNG encoding.
+async fn map(RawQuery(raw): RawQuery) -> Response {
+    let q = MapQuery::parse(raw.as_deref().unwrap_or(""));
+    let Ok(_permit) = permits().acquire().await else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
+    };
+    match tokio::task::spawn_blocking(move || render_png(&q)).await {
+        Ok(Ok((png, headers))) => {
+            let mut res = (
+                [
+                    (header::CONTENT_TYPE, "image/png"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                png,
+            )
+                .into_response();
+            set_headers(&mut res, headers);
+            res
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "map rendering failed").into_response(),
+    }
+}
+
+/// The RGBA buffer of the requested map.
+fn render_rgba(q: &MapQuery) -> Vec<u8> {
+    match q.kind {
+        Kind::Displacement => {
+            let cs = q.glass.cross_section();
+            q.glass.render_displacement(q.width, q.height, &cs)
+        }
+        Kind::Specular => q.glass.render_specular(q.width, q.height),
+        Kind::Rear => rear_field(q.width, q.height, q.rear, q.glass.strength),
+    }
+}
+
+type Headers = Vec<(&'static str, String)>;
+
+fn render_png(q: &MapQuery) -> Result<(Vec<u8>, Headers), a2ui_paint::optics::PngError> {
+    let t = Instant::now();
+    let rgba = render_rgba(q);
+    let render_us = t.elapsed().as_micros();
+    let t = Instant::now();
+    let png = png_rgba(q.width, q.height, &rgba)?;
+    let encode_us = t.elapsed().as_micros();
+    let headers = vec![
+        ("x-a2ui-render-us", render_us.to_string()),
+        ("x-a2ui-encode-us", encode_us.to_string()),
+        ("x-a2ui-size", format!("{}x{}", q.width, q.height)),
+    ];
+    Ok((png, headers))
+}
+
+fn filter_headers(glass: &Glass, max: f32) -> Headers {
+    let p = glass.filter_params(max);
+    vec![
         (
             "x-a2ui-filter-scale",
             format!("{:.3}", p.displacement_scale),
@@ -147,15 +202,19 @@ async fn map(RawQuery(raw): RawQuery) -> Response {
         ("x-a2ui-filter-fine", format!("{:.3}", p.fine_sigma)),
         ("x-a2ui-filter-wide", format!("{:.3}", p.wide_sigma)),
         ("x-a2ui-filter-share", format!("{:.3}", p.fine_share)),
+        ("x-a2ui-filter-tint", format!("{:.3}", p.tint_alpha)),
         ("x-a2ui-max-displacement", format!("{max:.3}")),
-        ("x-a2ui-f0", format!("{:.4}", q.glass.f0())),
-        ("x-a2ui-render-us", render_us.to_string()),
-    ] {
+        ("x-a2ui-f0", format!("{:.4}", glass.sanitized().f0())),
+    ]
+}
+
+fn set_headers(res: &mut Response, headers: Headers) {
+    let h = res.headers_mut();
+    for (name, value) in headers {
         if let Ok(v) = HeaderValue::from_str(&value) {
             h.insert(HeaderName::from_static(name), v);
         }
     }
-    res
 }
 
 #[cfg(test)]
@@ -191,6 +250,7 @@ mod tests {
     #[test]
     fn the_page_renders_the_engine_not_a_copy() {
         assert!(PAGE.contains("/lab/optics/map"));
+        assert!(PAGE.contains("/lab/optics/params"));
         assert!(PAGE.contains("x-a2ui-filter-scale"));
         for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
             assert!(
@@ -215,5 +275,55 @@ mod tests {
         for forbidden in ["mask", "clip", "overflow"] {
             assert!(!rear.contains(forbidden), "#rear uses {forbidden}: {rear}");
         }
+    }
+
+    /// G2 at the HTTP layer: the page sends colour with every request, so two presets must
+    /// yield byte-identical glass maps and different rear lights.
+    #[test]
+    fn colour_reaches_only_the_rear_light() {
+        let ruby = "w=180&h=90&hue=352&sat=0.75&halo=0.45&strength=0.53";
+        let ocean = "w=180&h=90&hue=212&sat=0.80&halo=0.45&strength=0.53";
+        for kind in ["disp", "spec"] {
+            let a = render_rgba(&MapQuery::parse(&format!("kind={kind}&{ruby}")));
+            let b = render_rgba(&MapQuery::parse(&format!("kind={kind}&{ocean}")));
+            assert_eq!(a, b, "{kind} depends on colour");
+        }
+        let a = render_rgba(&MapQuery::parse(&format!("kind=rear&{ruby}")));
+        let b = render_rgba(&MapQuery::parse(&format!("kind=rear&{ocean}")));
+        assert_ne!(a, b, "the rear light must carry the colour");
+    }
+
+    /// The page keys the glass maps without colour, so a colour change keeps them cached.
+    #[test]
+    fn the_page_keys_glass_maps_without_colour() {
+        let deps = |kind: &str| {
+            let start = PAGE
+                .find(&format!("    {kind}: ["))
+                .unwrap_or_else(|| panic!("no DEPS.{kind}"));
+            let line = &PAGE[start..];
+            line[..line.find(']').unwrap()].to_string()
+        };
+        for kind in ["params", "disp", "spec"] {
+            let d = deps(kind);
+            for colour in ["'hue'", "'sat'", "'halo'"] {
+                assert!(!d.contains(colour), "{kind} is keyed by {colour}: {d}");
+            }
+        }
+        assert!(deps("rear").contains("'hue'"));
+    }
+
+    /// Each request renders only its own map, at its own size (the rear box is not the
+    /// glass size).
+    #[test]
+    fn a_request_renders_only_its_map_at_its_size() {
+        let q = MapQuery::parse("kind=rear&w=370&h=260");
+        assert_eq!(render_rgba(&q).len(), 370 * 260 * 4);
+        let (png, headers) = render_png(&MapQuery::parse("kind=spec&w=64&h=40")).unwrap();
+        assert_eq!(&png[1..4], b"PNG");
+        assert!(
+            headers
+                .iter()
+                .any(|(k, v)| *k == "x-a2ui-size" && v == "64x40")
+        );
     }
 }
