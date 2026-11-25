@@ -196,13 +196,9 @@ impl SurfaceRenderer {
         self.terms = [refraction, rim, spec];
     }
 
-    /// Centre magnification for the green index: `1 / (1 + off'(0))`, the derivative of the
-    /// inward offset at the centre (1 on a flat face).
+    /// Centre magnification for the green index (`Surface::centre_magnification`).
     pub fn magnification(&self) -> f32 {
-        let s = &self.surface;
-        let e = s.footprint.inradius().max(2.0) * 0.01;
-        let a = s.offsets([e, 0.0])[1].min(s.offsets([0.0, e])[1]);
-        1.0 / (1.0 + a / e)
+        self.surface.centre_magnification()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -258,6 +254,7 @@ impl SurfaceRenderer {
         gl.uniform3f(l("u_hv").as_ref(), u.hv[0], u.hv[1], u.hv[2]);
         gl.uniform1f(l("u_shininess").as_ref(), u.shininess);
         gl.uniform1f(l("u_spec").as_ref(), u.spec);
+        gl.uniform1f(l("u_reflection").as_ref(), u.reflection);
         gl.viewport(0, 0, view[0] as i32, view[1] as i32);
         gl.clear_color(0.0, 0.0, 0.0, 0.0);
         gl.clear(Gl::COLOR_BUFFER_BIT);

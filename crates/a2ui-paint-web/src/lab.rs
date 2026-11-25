@@ -1,24 +1,24 @@
-//! The Material Laboratory: one glass element over calibration backgrounds, rendered from
-//! the maps [`a2ui_paint::optics`] computes. The page holds no optics of its own: every map
-//! comes from `/lab/optics/map` and the filter parameters from `/lab/optics/params` (in
-//! response headers), so what is judged here is the Rust engine itself (plan
-//! `.claude/plans/a2ui-material-appearance-v1.md` §7, step B).
+//! The Material Laboratory: optical surfaces over calibration scenes, rendered from the one
+//! specification in [`a2ui_paint::optics::surface`]. Two backends: SVG filters over the CPU
+//! maps (`/lab/optics/surface/map`, the native-DOM path report-rs would use) and the WebGL2
+//! shader of `a2ui-optics-gl` (`/lab/optics/gl/…`, for A2UI-owned scenes). The pages hold no
+//! optics of their own; every number comes from Rust.
 //!
-//! Each request computes only the map it names, off the async runtime, at most
-//! [`CONCURRENT_RENDERS`] at a time. The page keys each map by the parameters that map depends
-//! on, so a colour change fetches only the rear light; the glass maps stay cached.
+//! Pages: `/lab/optics` (one surface, calibration backgrounds, stages, both backends;
+//! `/lab/optics/drop` and `/lab/optics/drop-gl` open it on the droplet) and
+//! `/lab/optics/hub` (the Service Hub fixture of report-rs #208/#209: neutral cards and the
+//! Ruby-lit Dashboard card, native SVG/DOM composition).
 //!
-//! Visual acceptance (gate G1) is the operator's and happens on this page; the unit tests
-//! of `a2ui_paint::optics` cover G2, G3 and G5.
+//! Each map request computes only the map it names, off the async runtime, at most
+//! [`CONCURRENT_RENDERS`] at a time. Visual acceptance (gate G1b) is the operator's; the unit
+//! tests of `a2ui_paint::optics` cover G2, G3 and G5.
 
 use std::sync::OnceLock;
 use std::time::Instant;
 
 use tokio::sync::Semaphore;
 
-use a2ui_paint::optics::{
-    Droplet, Glass, KeyLight, Medium, Profile, RearLight, png_rgba, rear_field,
-};
+use a2ui_paint::optics::{RearLight, png_rgba, rear_field};
 use axum::{
     Router,
     extract::RawQuery,
@@ -27,22 +27,19 @@ use axum::{
     routing::get,
 };
 
-/// The page. Static: its controls only build `/lab/optics/map` URLs.
-const PAGE: &str = include_str!("lab.html");
-
-/// The raindrop experiment: a movable droplet over a page of text.
-const DROP_PAGE: &str = include_str!("drop.html");
-
-/// Optical surfaces (droplet, capsule, card presets of one specification) on two backends:
-/// SVG filters over CPU maps (`/lab/optics/surface/map`) and the WebGL2 shader of
-/// `a2ui-optics-gl` (wasm, raw WebGL2, no wgpu).
+/// One surface over calibration backgrounds, on both backends.
 const SURFACE_PAGE: &str = include_str!("surface.html");
+
+/// The Service Hub fixture (report-rs #208/#209) under the shared surface specification.
+const HUB_PAGE: &str = include_str!("hub.html");
 
 /// Largest map edge the server renders, px.
 const MAX_EDGE: u32 = 1600;
 
 /// Maps computed at the same time; further requests wait.
 const CONCURRENT_RENDERS: usize = 2;
+
+type Headers = Vec<(&'static str, String)>;
 
 fn permits() -> &'static Semaphore {
     static P: OnceLock<Semaphore> = OnceLock::new();
@@ -51,17 +48,94 @@ fn permits() -> &'static Semaphore {
 
 /// Add the laboratory routes.
 pub fn routes(app: Router) -> Router {
-    app.route("/lab/optics", get(page))
-        .route("/lab/optics/map", get(map))
-        .route("/lab/optics/params", get(params))
-        .route("/lab/optics/drop", get(drop_page))
-        .route("/lab/optics/drop/map", get(drop_map))
+    app.route("/lab/optics", get(surface_page))
+        // the earlier droplet pages open the surface page on the droplet preset
+        .route("/lab/optics/drop", get(surface_page))
+        .route("/lab/optics/drop-gl", get(surface_page))
         .route("/lab/optics/surface", get(surface_page))
         .route("/lab/optics/surface/map", get(surface_map))
         .route("/lab/optics/surface/params", get(surface_params))
-        // the droplet on the GPU, as first shipped: the surface page's droplet preset
-        .route("/lab/optics/drop-gl", get(surface_page))
+        .route("/lab/optics/rear", get(rear_map))
+        .route("/lab/optics/hub", get(hub_page))
         .route("/lab/optics/gl/{file}", get(gl_file))
+}
+
+async fn hub_page() -> Html<&'static str> {
+    Html(HUB_PAGE)
+}
+
+/// The rear-light query: box size and the light (`hue`, `sat`, `halo`) at `strength`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RearQuery {
+    width: u32,
+    height: u32,
+    light: RearLight,
+    strength: f32,
+}
+
+impl RearQuery {
+    fn parse(raw: &str) -> Self {
+        let mut q = Self {
+            width: 420,
+            height: 300,
+            light: RearLight {
+                hue: 352.0,
+                sat: 0.75,
+                halo: 0.45,
+            },
+            strength: 1.0,
+        };
+        for pair in raw.split('&').filter(|s| !s.is_empty()) {
+            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+            let n = || v.parse::<f32>().ok().filter(|x| x.is_finite());
+            let edge = |x: f32| x.clamp(1.0, MAX_EDGE as f32) as u32;
+            match k {
+                "w" => q.width = n().map_or(q.width, edge),
+                "h" => q.height = n().map_or(q.height, edge),
+                "hue" => q.light.hue = n().map_or(q.light.hue, |x| x.rem_euclid(360.0)),
+                "sat" => q.light.sat = n().map_or(q.light.sat, |x| x.clamp(0.0, 1.0)),
+                "halo" => q.light.halo = n().map_or(q.light.halo, |x| x.clamp(0.0, 1.0)),
+                "strength" => q.strength = n().map_or(q.strength, |x| x.clamp(0.0, 1.0)),
+                _ => {}
+            }
+        }
+        q
+    }
+
+    fn render(&self) -> Vec<u8> {
+        rear_field(self.width, self.height, self.light, self.strength)
+    }
+}
+
+/// The rear light behind an active surface as PNG (the only place the atmosphere's colour
+/// enters, gate G2).
+async fn rear_map(RawQuery(raw): RawQuery) -> Response {
+    let q = RearQuery::parse(raw.as_deref().unwrap_or(""));
+    let Ok(_permit) = permits().acquire().await else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
+    };
+    let out = tokio::task::spawn_blocking(move || {
+        let t = Instant::now();
+        let rgba = q.render();
+        let us = t.elapsed().as_micros();
+        png_rgba(q.width, q.height, &rgba).map(|png| (png, us))
+    })
+    .await;
+    match out {
+        Ok(Ok((png, us))) => {
+            let mut res = (
+                [
+                    (header::CONTENT_TYPE, "image/png"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                png,
+            )
+                .into_response();
+            set_headers(&mut res, vec![("x-a2ui-render-us", us.to_string())]);
+            res
+        }
+        _ => (StatusCode::INTERNAL_SERVER_ERROR, "map rendering failed").into_response(),
+    }
 }
 
 async fn surface_page() -> Html<&'static str> {
@@ -111,6 +185,7 @@ async fn surface_map(RawQuery(raw): RawQuery) -> Response {
     let out = tokio::task::spawn_blocking(move || {
         let t = Instant::now();
         let m = surface.render_maps();
+        let eff = surface.sanitized().effective();
         let render_us = t.elapsed().as_micros();
         let buf = match kind.as_str() {
             "spec" => &m.specular,
@@ -134,14 +209,11 @@ async fn surface_map(RawQuery(raw): RawQuery) -> Response {
             }),
             (
                 "x-a2ui-sigma",
-                format!(
-                    "{:.3} {:.3}",
-                    surface.scatter.fine_sigma, surface.scatter.wide_sigma
-                ),
+                format!("{:.3} {:.3}", eff.fine_sigma, eff.wide_sigma),
             ),
             ("x-a2ui-tint", {
                 let [r, g, b] = surface.tint.rgb;
-                format!("{r} {g} {b} {:.3}", surface.tint.alpha)
+                format!("{r} {g} {b} {:.3}", eff.tint_alpha)
             }),
             ("x-a2ui-render-us", render_us.to_string()),
         ];
@@ -213,279 +285,6 @@ async fn gl_file(axum::extract::Path(file): axum::extract::Path<String>) -> Resp
     }
 }
 
-async fn drop_page() -> Html<&'static str> {
-    Html(DROP_PAGE)
-}
-
-/// The query of `/lab/optics/drop/map`: geometry, medium, dispersion exaggeration, light.
-#[derive(Debug, Clone, PartialEq)]
-struct DropQuery {
-    /// `disp`, `spec` or `rim`.
-    kind: String,
-    droplet: Droplet,
-    medium: Medium,
-    dispersion: f32,
-    light: KeyLight,
-}
-
-impl DropQuery {
-    fn parse(raw: &str) -> Self {
-        let mut q = Self {
-            kind: "disp".into(),
-            droplet: Droplet {
-                radius: 90.0,
-                height: 28.0,
-            },
-            medium: Medium::WATER,
-            dispersion: 0.0,
-            light: KeyLight::DEFAULT,
-        };
-        let mut curv = 0.85;
-        for pair in raw.split('&').filter(|s| !s.is_empty()) {
-            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-            let n = || v.parse::<f32>().ok().filter(|x| x.is_finite());
-            match k {
-                "kind" if matches!(v, "disp" | "spec" | "rim") => q.kind = v.into(),
-                "r" => q.droplet.radius = n().map_or(q.droplet.radius, |x| x.clamp(8.0, 400.0)),
-                // curvature: apex height as a fraction of the footprint radius
-                "curv" => curv = n().map_or(curv, |x| x.clamp(0.02, 1.0)),
-                "medium" => {
-                    q.medium = match v {
-                        "glass" => Medium::CROWN_GLASS,
-                        "diamond" => Medium::DIAMOND,
-                        _ => Medium::WATER,
-                    }
-                }
-                "disp" => q.dispersion = n().map_or(q.dispersion, |x| x.clamp(0.0, 40.0)),
-                "light" => {
-                    q.light.angle_deg = n().map_or(q.light.angle_deg, |x| x.clamp(-360.0, 360.0))
-                }
-                "spec" => q.light.intensity = n().map_or(q.light.intensity, |x| x.clamp(0.0, 1.0)),
-                "rim" => q.light.rim = n().map_or(q.light.rim, |x| x.clamp(0.0, 1.0)),
-                _ => {}
-            }
-        }
-        q.droplet.height = curv * q.droplet.radius;
-        q
-    }
-}
-
-/// One droplet map as PNG; the per-channel filter scales come back as headers.
-async fn drop_map(RawQuery(raw): RawQuery) -> Response {
-    let q = DropQuery::parse(raw.as_deref().unwrap_or(""));
-    let Ok(_permit) = permits().acquire().await else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
-    };
-    let out = tokio::task::spawn_blocking(move || {
-        let t = Instant::now();
-        let m = q.droplet.render(q.medium, q.light, q.dispersion);
-        let render_us = t.elapsed().as_micros();
-        let buf = match q.kind.as_str() {
-            "spec" => &m.specular,
-            "rim" => &m.rim,
-            _ => &m.displacement,
-        };
-        let png = png_rgba(m.side, m.side, buf)?;
-        let [r, g, b] = m.channel_scales;
-        Ok::<_, a2ui_paint::optics::PngError>((
-            png,
-            vec![
-                ("x-a2ui-scale-r", format!("{r:.3}")),
-                ("x-a2ui-scale-g", format!("{g:.3}")),
-                ("x-a2ui-scale-b", format!("{b:.3}")),
-                ("x-a2ui-side", m.side.to_string()),
-                (
-                    "x-a2ui-magnification",
-                    format!("{:.3}", q.droplet.centre_magnification(q.medium.ior)),
-                ),
-                ("x-a2ui-render-us", render_us.to_string()),
-            ],
-        ))
-    })
-    .await;
-    match out {
-        Ok(Ok((png, headers))) => {
-            let mut res = (
-                [
-                    (header::CONTENT_TYPE, "image/png"),
-                    (header::CACHE_CONTROL, "no-store"),
-                ],
-                png,
-            )
-                .into_response();
-            set_headers(&mut res, headers);
-            res
-        }
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, "map rendering failed").into_response(),
-    }
-}
-
-async fn page() -> Html<&'static str> {
-    Html(PAGE)
-}
-
-/// Which map to render.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Displacement,
-    Specular,
-    Fresnel,
-    Rear,
-}
-
-/// The query of `/lab/optics/map`: size, glass, rear light. Unknown keys are ignored and
-/// out-of-range values clamped, so any URL renders something.
-#[derive(Debug, Clone, PartialEq)]
-struct MapQuery {
-    kind: Kind,
-    width: u32,
-    height: u32,
-    glass: Glass,
-    rear: RearLight,
-}
-
-impl MapQuery {
-    fn parse(raw: &str) -> Self {
-        let mut q = Self {
-            kind: Kind::Displacement,
-            width: 420,
-            height: 200,
-            glass: Glass::DEFAULT,
-            rear: RearLight {
-                hue: 352.0,
-                sat: 0.75,
-                halo: 0.45,
-            },
-        };
-        for pair in raw.split('&').filter(|s| !s.is_empty()) {
-            let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-            let n = || v.parse::<f32>().ok().filter(|x| x.is_finite());
-            let g = &mut q.glass;
-            match k {
-                "kind" => {
-                    q.kind = match v {
-                        "spec" => Kind::Specular,
-                        "fresnel" => Kind::Fresnel,
-                        "rear" => Kind::Rear,
-                        _ => Kind::Displacement,
-                    }
-                }
-                "w" => q.width = n().map_or(q.width, |x| x as u32),
-                "h" => q.height = n().map_or(q.height, |x| x as u32),
-                "profile" => g.profile = Profile::parse(v).unwrap_or(g.profile),
-                "radius" => g.radius = n().map_or(g.radius, |x| x.clamp(0.0, 400.0)),
-                "bezel" => g.bezel = n().map_or(g.bezel, |x| x.clamp(1.0, 200.0)),
-                "thickness" => g.thickness = n().map_or(g.thickness, |x| x.clamp(0.0, 200.0)),
-                "depth" => g.depth = n().map_or(g.depth, |x| x.clamp(0.0, 200.0)),
-                "ior" => g.ior = n().map_or(g.ior, |x| x.clamp(1.0, 3.0)),
-                "refraction" => g.refraction = n().map_or(g.refraction, |x| x.clamp(0.0, 4.0)),
-                "fine" => g.fine_sigma = n().map_or(g.fine_sigma, |x| x.clamp(0.0, 20.0)),
-                "wide" => g.wide_sigma = n().map_or(g.wide_sigma, |x| x.clamp(0.0, 60.0)),
-                "share" => g.fine_share = n().map_or(g.fine_share, |x| x.clamp(0.0, 1.0)),
-                "tint" => g.tint = n().map_or(g.tint, |x| x.clamp(0.0, 1.0)),
-                "reflect" => g.reflection = n().map_or(g.reflection, |x| x.clamp(0.0, 4.0)),
-                "light" => {
-                    g.light_angle_deg = n().map_or(g.light_angle_deg, |x| x.clamp(-360.0, 360.0))
-                }
-                "specexp" => g.spec_exp = n().map_or(g.spec_exp, |x| x.clamp(1.0, 64.0)),
-                "specop" => g.spec_opacity = n().map_or(g.spec_opacity, |x| x.clamp(0.0, 1.0)),
-                "strength" => g.strength = n().map_or(g.strength, |x| x.clamp(0.0, 1.0)),
-                "hue" => q.rear.hue = n().map_or(q.rear.hue, |x| x.rem_euclid(360.0)),
-                "sat" => q.rear.sat = n().map_or(q.rear.sat, |x| x.clamp(0.0, 1.0)),
-                "halo" => q.rear.halo = n().map_or(q.rear.halo, |x| x.clamp(0.0, 1.0)),
-                _ => {}
-            }
-        }
-        q.width = q.width.clamp(1, MAX_EDGE);
-        q.height = q.height.clamp(1, MAX_EDGE);
-        q
-    }
-}
-
-/// The filter parameters and the cross-section's maximum for a glass, in response headers.
-/// Cheap (one 129-sample cross-section), so the page fetches it on every change.
-async fn params(RawQuery(raw): RawQuery) -> Response {
-    let q = MapQuery::parse(raw.as_deref().unwrap_or(""));
-    let max = q.glass.cross_section().max;
-    let mut res = (
-        StatusCode::NO_CONTENT,
-        [(header::CACHE_CONTROL, "no-store")],
-    )
-        .into_response();
-    set_headers(&mut res, filter_headers(&q.glass, max));
-    res
-}
-
-/// One map as PNG: only the map named by `kind`. `x-a2ui-render-us` is the arithmetic only,
-/// `x-a2ui-encode-us` the PNG encoding.
-async fn map(RawQuery(raw): RawQuery) -> Response {
-    let q = MapQuery::parse(raw.as_deref().unwrap_or(""));
-    let Ok(_permit) = permits().acquire().await else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
-    };
-    match tokio::task::spawn_blocking(move || render_png(&q)).await {
-        Ok(Ok((png, headers))) => {
-            let mut res = (
-                [
-                    (header::CONTENT_TYPE, "image/png"),
-                    (header::CACHE_CONTROL, "no-store"),
-                ],
-                png,
-            )
-                .into_response();
-            set_headers(&mut res, headers);
-            res
-        }
-        _ => (StatusCode::INTERNAL_SERVER_ERROR, "map rendering failed").into_response(),
-    }
-}
-
-/// The RGBA buffer of the requested map.
-fn render_rgba(q: &MapQuery) -> Vec<u8> {
-    match q.kind {
-        Kind::Displacement => {
-            let cs = q.glass.cross_section();
-            q.glass.render_displacement(q.width, q.height, &cs)
-        }
-        Kind::Specular => q.glass.render_specular(q.width, q.height),
-        Kind::Fresnel => q.glass.render_fresnel(q.width, q.height),
-        Kind::Rear => rear_field(q.width, q.height, q.rear, q.glass.strength),
-    }
-}
-
-type Headers = Vec<(&'static str, String)>;
-
-fn render_png(q: &MapQuery) -> Result<(Vec<u8>, Headers), a2ui_paint::optics::PngError> {
-    let t = Instant::now();
-    let rgba = render_rgba(q);
-    let render_us = t.elapsed().as_micros();
-    let t = Instant::now();
-    let png = png_rgba(q.width, q.height, &rgba)?;
-    let encode_us = t.elapsed().as_micros();
-    let headers = vec![
-        ("x-a2ui-render-us", render_us.to_string()),
-        ("x-a2ui-encode-us", encode_us.to_string()),
-        ("x-a2ui-size", format!("{}x{}", q.width, q.height)),
-    ];
-    Ok((png, headers))
-}
-
-fn filter_headers(glass: &Glass, max: f32) -> Headers {
-    let p = glass.filter_params(max);
-    vec![
-        (
-            "x-a2ui-filter-scale",
-            format!("{:.3}", p.displacement_scale),
-        ),
-        ("x-a2ui-filter-fine", format!("{:.3}", p.fine_sigma)),
-        ("x-a2ui-filter-wide", format!("{:.3}", p.wide_sigma)),
-        ("x-a2ui-filter-share", format!("{:.3}", p.fine_share)),
-        ("x-a2ui-filter-tint", format!("{:.3}", p.tint_alpha)),
-        ("x-a2ui-max-displacement", format!("{max:.3}")),
-        ("x-a2ui-f0", format!("{:.4}", glass.sanitized().f0())),
-    ]
-}
-
 fn set_headers(res: &mut Response, headers: Headers) {
     let h = res.headers_mut();
     for (name, value) in headers {
@@ -498,122 +297,70 @@ fn set_headers(res: &mut Response, headers: Headers) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use a2ui_paint::optics::surface::Surface;
 
+    /// The pages hold no optics of their own: no SDF, no Snell, no map arithmetic. They only
+    /// build map URLs and read the headers.
     #[test]
-    fn the_query_defaults_to_the_prototype_and_clamps() {
-        let q = MapQuery::parse("");
-        assert_eq!(q.glass, Glass::DEFAULT);
-        assert_eq!((q.width, q.height, q.kind), (420, 200, Kind::Displacement));
-        let q =
-            MapQuery::parse("kind=rear&w=99999&h=0&ior=9&strength=-1&profile=circle&hue=-10&bogus");
-        assert_eq!((q.width, q.height, q.kind), (MAX_EDGE, 1, Kind::Rear));
-        assert_eq!(
-            (q.glass.ior, q.glass.strength, q.glass.profile),
-            (3.0, 0.0, Profile::Circle)
-        );
-        assert_eq!(q.rear.hue, 350.0);
-    }
-
-    #[test]
-    fn non_finite_values_keep_the_default() {
-        let q = MapQuery::parse("ior=NaN&radius=inf");
-        assert_eq!(
-            (q.glass.ior, q.glass.radius),
-            (Glass::DEFAULT.ior, Glass::DEFAULT.radius)
-        );
-    }
-
-    /// The page holds no optics of its own: no SDF, no Snell, no map arithmetic. It only
-    /// builds `/lab/optics/map` URLs and reads the filter headers.
-    #[test]
-    fn the_page_renders_the_engine_not_a_copy() {
-        assert!(PAGE.contains("/lab/optics/map"));
-        assert!(PAGE.contains("/lab/optics/params"));
-        assert!(PAGE.contains("x-a2ui-filter-scale"));
-        for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
-            assert!(
-                !PAGE.contains(forbidden),
-                "lab.html computes optics itself: {forbidden}"
-            );
-        }
-    }
-
-    /// G5 on the page: the rear-light layer carries no mask and no clip.
-    #[test]
-    fn the_rear_layer_has_no_mask_or_clip() {
-        let css = PAGE
-            .split("<style>")
-            .nth(1)
-            .and_then(|s| s.split("</style>").next())
-            .unwrap();
-        let rear = css
-            .split('}')
-            .find(|r| r.trim_start().starts_with("#rear"))
-            .expect("#rear rule");
-        for forbidden in ["mask", "clip", "overflow"] {
-            assert!(!rear.contains(forbidden), "#rear uses {forbidden}: {rear}");
-        }
-    }
-
-    /// G2 at the HTTP layer: the page sends colour with every request, so two presets must
-    /// yield byte-identical glass maps and different rear lights.
-    #[test]
-    fn colour_reaches_only_the_rear_light() {
-        let ruby = "w=180&h=90&hue=352&sat=0.75&halo=0.45&strength=0.53";
-        let ocean = "w=180&h=90&hue=212&sat=0.80&halo=0.45&strength=0.53";
-        for kind in ["disp", "spec"] {
-            let a = render_rgba(&MapQuery::parse(&format!("kind={kind}&{ruby}")));
-            let b = render_rgba(&MapQuery::parse(&format!("kind={kind}&{ocean}")));
-            assert_eq!(a, b, "{kind} depends on colour");
-        }
-        let a = render_rgba(&MapQuery::parse(&format!("kind=rear&{ruby}")));
-        let b = render_rgba(&MapQuery::parse(&format!("kind=rear&{ocean}")));
-        assert_ne!(a, b, "the rear light must carry the colour");
-    }
-
-    /// The page keys the glass maps without colour, so a colour change keeps them cached.
-    #[test]
-    fn the_page_keys_glass_maps_without_colour() {
-        let deps = |kind: &str| {
-            let start = PAGE
-                .find(&format!("    {kind}: ["))
-                .unwrap_or_else(|| panic!("no DEPS.{kind}"));
-            let line = &PAGE[start..];
-            line[..line.find(']').unwrap()].to_string()
-        };
-        for kind in ["params", "disp", "spec"] {
-            let d = deps(kind);
-            for colour in ["'hue'", "'sat'", "'halo'"] {
-                assert!(!d.contains(colour), "{kind} is keyed by {colour}: {d}");
+    fn the_pages_render_the_engine_not_a_copy() {
+        for (name, page) in [("surface.html", SURFACE_PAGE), ("hub.html", HUB_PAGE)] {
+            assert!(page.contains("/lab/optics/surface/map"), "{name}");
+            for forbidden in [
+                "Math.sqrt",
+                "Math.hypot",
+                "createImageData",
+                "putImageData",
+                "getContext('webgl",
+            ] {
+                assert!(
+                    !page.contains(forbidden),
+                    "{name} computes optics itself: {forbidden}"
+                );
             }
         }
-        assert!(deps("rear").contains("'hue'"));
+        assert!(SURFACE_PAGE.contains("/lab/optics/surface/params"));
     }
 
-    /// Each request renders only its own map, at its own size (the rear box is not the
-    /// glass size).
+    /// G5 on the pages: the rear-light layer carries no mask and no clip.
     #[test]
-    fn a_request_renders_only_its_map_at_its_size() {
-        let q = MapQuery::parse("kind=rear&w=370&h=260");
-        assert_eq!(render_rgba(&q).len(), 370 * 260 * 4);
-        let (png, headers) = render_png(&MapQuery::parse("kind=spec&w=64&h=40")).unwrap();
-        assert_eq!(&png[1..4], b"PNG");
-        assert!(
-            headers
-                .iter()
-                .any(|(k, v)| *k == "x-a2ui-size" && v == "64x40")
+    fn the_rear_layer_has_no_mask_or_clip() {
+        for page in [SURFACE_PAGE, HUB_PAGE] {
+            let css = page
+                .split("<style>")
+                .nth(1)
+                .and_then(|s| s.split("</style>").next())
+                .unwrap();
+            let rear = css
+                .split('}')
+                .find(|r| r.contains(".rear"))
+                .expect(".rear rule");
+            for forbidden in ["mask", "clip", "overflow"] {
+                assert!(!rear.contains(forbidden), "rear uses {forbidden}: {rear}");
+            }
+        }
+    }
+
+    /// G2 at the HTTP layer: colour keys reach only the rear light; the surface ignores them.
+    #[test]
+    fn colour_reaches_only_the_rear_light() {
+        let a = Surface::from_query("preset=aqua&hue=352&sat=0.75").render_maps();
+        let b = Surface::from_query("preset=aqua&hue=212&sat=0.80").render_maps();
+        assert_eq!(a, b);
+        let ruby = RearQuery::parse("w=180&h=90&hue=352&sat=0.75&halo=0.45&strength=0.53");
+        let ocean = RearQuery::parse("w=180&h=90&hue=212&sat=0.80&halo=0.45&strength=0.53");
+        assert_ne!(
+            ruby.render(),
+            ocean.render(),
+            "the rear light must carry the colour"
         );
     }
 
     #[test]
-    fn the_drop_query_reads_geometry_medium_and_dispersion() {
-        let q = DropQuery::parse("kind=rim&r=120&curv=0.5&medium=diamond&disp=4&bogus=1");
-        assert_eq!(q.kind, "rim");
-        assert_eq!((q.droplet.radius, q.droplet.height), (120.0, 60.0));
-        assert_eq!((q.medium, q.dispersion), (Medium::DIAMOND, 4.0));
-        let d = DropQuery::parse("curv=NaN&r=9999&medium=x");
-        assert_eq!((d.droplet.radius, d.medium), (400.0, Medium::WATER));
-        assert!((d.droplet.height / d.droplet.radius - 0.85).abs() < 1e-6);
+    fn the_rear_query_renders_at_its_size_and_clamps() {
+        let q = RearQuery::parse("w=370&h=260&halo=NaN&strength=2");
+        assert_eq!(q.render().len(), 370 * 260 * 4);
+        assert_eq!((q.light.halo, q.strength), (0.45, 1.0));
+        assert_eq!(RearQuery::parse("w=99999").width, MAX_EDGE);
     }
 
     /// The GPU page serves exactly the renderer's files and nothing else.
@@ -656,18 +403,6 @@ mod tests {
             assert!(
                 !SURFACE_PAGE.contains(forbidden),
                 "drop-gl.html computes optics itself: {forbidden}"
-            );
-        }
-    }
-
-    /// The droplet page, like the card lab, computes no optics itself.
-    #[test]
-    fn the_drop_page_renders_the_engine_not_a_copy() {
-        assert!(DROP_PAGE.contains("/lab/optics/drop/map") && DROP_PAGE.contains("x-a2ui-scale-b"));
-        for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
-            assert!(
-                !DROP_PAGE.contains(forbidden),
-                "drop.html computes optics itself: {forbidden}"
             );
         }
     }

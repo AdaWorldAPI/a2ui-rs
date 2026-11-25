@@ -52,6 +52,7 @@ pub struct SurfaceUniforms {
     pub hv: [f32; 3],
     pub shininess: f32,
     pub spec: f32,
+    pub reflection: f32,
 }
 
 impl SurfaceUniforms {
@@ -60,6 +61,8 @@ impl SurfaceUniforms {
     #[must_use]
     pub fn new(s: &Surface, terms: [bool; 3]) -> Self {
         let on = |b: bool| if b { 1.0 } else { 0.0 };
+        let s = &s.sanitized();
+        let eff = s.effective();
         let fp = s.footprint;
         let rl = s.relief;
         Self {
@@ -69,18 +72,19 @@ impl SurfaceUniforms {
             relief: [rl.height, rl.face, rl.shoulder, rl.profile],
             base: rl.base,
             ior: s.medium.channel_iors(s.dispersion),
-            refraction: on(terms[0]),
+            refraction: on(terms[0]) * s.strength(),
             weights: s.scatter.normalized(),
-            sigma: [s.scatter.fine_sigma, s.scatter.wide_sigma],
+            sigma: [eff.fine_sigma, eff.wide_sigma],
             tint: {
                 let [r, g, b] = s.tint.rgb.map(|c| f32::from(c) / 255.0);
-                [r, g, b, s.tint.alpha.clamp(0.0, 1.0)]
+                [r, g, b, eff.tint_alpha]
             },
             f0: s.f0(),
-            rim: s.light.rim * on(terms[1]),
+            rim: eff.light.rim * on(terms[1]),
             hv: half_vector(&s.light),
             shininess: s.light.shininess,
-            spec: s.light.intensity * on(terms[2]),
+            spec: eff.light.intensity * on(terms[2]),
+            reflection: eff.reflection * on(terms[2]),
         }
     }
 }
@@ -115,7 +119,22 @@ mod tests {
         let n = u.hv.iter().map(|x| x * x).sum::<f32>().sqrt();
         assert!((n - 1.0).abs() < 1e-5);
         let off = SurfaceUniforms::new(&s, [false; 3]);
-        assert_eq!((off.refraction, off.rim, off.spec), (0.0, 0.0, 0.0));
+        assert_eq!(
+            (off.refraction, off.rim, off.spec, off.reflection),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        let zero = SurfaceUniforms::new(&Surface { strength: 0.0, ..s }, [true; 3]);
+        assert_eq!(
+            (
+                zero.refraction,
+                zero.spec,
+                zero.reflection,
+                zero.tint[3],
+                zero.sigma
+            ),
+            (0.0, 0.0, 0.0, 0.0, [0.0, 0.0]),
+            "strength 0 is plain glass on the GPU too"
+        );
         let water = Surface {
             medium: Medium::WATER,
             ..s
@@ -144,6 +163,7 @@ mod tests {
             "float rs = (rin * rin + hd * hd) / (2.0 * hd);",
             "float a = clamp(0.5 - sd, 0.0, 1.0);",
             "col = mix(col, u_tint.rgb, u_tint.a);",
+            "col = col * (1.0 - refl) + refl;",
         ] {
             assert!(FRAGMENT_SHADER.contains(line), "shader lacks: {line}");
         }

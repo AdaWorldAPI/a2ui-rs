@@ -8,6 +8,7 @@
 html,body{margin:0;height:100%}
 body{background:#f7f4ec;color:#1c1a17;overflow:hidden;font:16px/1.45 Georgia,"Times New Roman",serif}
 #page{position:absolute;inset:0;width:100%;height:100%}
+.rear{position:absolute;left:0;top:0;pointer-events:none;background-size:100% 100%;background-repeat:no-repeat}
 #gl,#svgsurf{position:absolute;left:0;top:0;touch-action:none;cursor:grab;will-change:transform}
 #svgsurf{-webkit-backdrop-filter:url(#surf);backdrop-filter:url(#surf);overflow:hidden}
 #svgsurf .layer{position:absolute;inset:0;background-size:100% 100%;pointer-events:none}
@@ -27,6 +28,7 @@ body{background:#f7f4ec;color:#1c1a17;overflow:hidden;font:16px/1.45 Georgia,"Ti
 </style>
 <body>
 <canvas id="page" aria-hidden="true"></canvas>
+<div id="rear" class="rear" hidden></div>
 <canvas id="gl" aria-hidden="true" hidden></canvas>
 <div id="svgsurf" hidden><div class="layer" id="rimL"></div><div class="layer" id="specL"></div></div>
 <div id="text" class="sr"></div>
@@ -49,9 +51,30 @@ body{background:#f7f4ec;color:#1c1a17;overflow:hidden;font:16px/1.45 Georgia,"Ti
 <form id="panel" onsubmit="return false">
 <h1>Optical surfaces</h1>
 <p id="support">Loading…</p>
-<p>One specification (<code>a2ui_paint::optics::surface</code>), two backends: SVG filters over CPU maps, or the WebGL2 shader. Presets are parameter sets; every control is independent.</p>
+<p>One specification (<code>a2ui_paint::optics::surface</code>), two backends: SVG filters over CPU maps (the native-DOM path), or the WebGL2 shader (A2UI-owned scenes). Presets are parameter sets; every control is independent. <a href="/lab/optics/hub">Service Hub fixture →</a></p>
 <div class="row" id="presets"></div>
 <label><span>Backend</span><select id="backend"><option value="gl">WebGL2 (wasm shader)</option><option value="svg">SVG filter over CPU maps (Chromium)</option></select></label>
+<label><span>Background</span><select id="bg"><option value="text">Page of text</option><option value="checker">Checkerboard (displacement)</option>
+<option value="stripes">Lines (distortion)</option><option value="split">Black / white (transmission)</option><option value="gradient">Gradient</option>
+<option value="rgb">RGB bands (dispersion)</option><option value="hub">Service Hub background</option></select></label>
+<div class="row" id="sizes"><button type="button" data-size="56" data-aspect="2.143">Control 120×56</button><button type="button" data-size="200" data-aspect="2.1">Card 420×200</button><button type="button" data-size="560" data-aspect="1.607">Panel 900×560</button></div>
+<label><span>Effect strength <output data-for="strength"></output></span><input data-q="strength" type="range" min="0" max="1" step="0.01"></label>
+<h2>Stages and terms</h2>
+<div class="row" id="stages"><button type="button" data-stage="1" title="refraction only">1</button><button type="button" data-stage="2" title="+ Fresnel">2</button><button type="button" data-stage="3" title="+ highlight">3</button><button type="button" data-stage="4" title="+ fine scatter">4</button><button type="button" data-stage="5" title="+ wide scatter">5</button><button type="button" data-stage="6" title="+ rear light">6</button><button type="button" data-stage="7" title="+ tint">7</button></div>
+<div class="row">
+<label><input type="checkbox" data-term="refraction" checked> refraction</label>
+<label><input type="checkbox" data-term="fresnel" checked> Fresnel</label>
+<label><input type="checkbox" data-term="spec" checked> highlight</label>
+<label><input type="checkbox" data-term="fine" checked> fine</label>
+<label><input type="checkbox" data-term="wide" checked> wide</label>
+<label><input type="checkbox" data-term="rear"> rear light</label>
+<label><input type="checkbox" data-term="tint" checked> tint</label>
+</div>
+<h2>Rear light (the atmosphere's colour)</h2>
+<div class="row" id="ambients"><button type="button" data-hue="352" data-sat="0.75">Ruby</button><button type="button" data-hue="212" data-sat="0.80">Ocean</button><button type="button" data-hue="158" data-sat="0.55">Mint</button><button type="button" data-hue="45" data-sat="0.70">Vanilla</button><button type="button" data-hue="0" data-sat="0">Neutral</button></div>
+<label><span>Hue <output id="hueO"></output></span><input id="hue" type="range" min="0" max="359" value="352"></label>
+<label><span>Saturation <output id="satO"></output></span><input id="sat" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+<label><span>Intensity <output id="haloO"></output></span><input id="halo" type="range" min="0" max="1" step="0.01" value="0.45"></label>
 <h2>Footprint</h2>
 <label><span>Shorter side px <output data-for="size"></output></span><input data-q="size" type="range" min="20" max="500" step="1"></label>
 <label><span>Aspect (w / h) <output data-for="aspect"></output></span><input data-q="aspect" type="range" min="0.25" max="5" step="0.05"></label>
@@ -79,12 +102,8 @@ body{background:#f7f4ec;color:#1c1a17;overflow:hidden;font:16px/1.45 Georgia,"Ti
 <label><span>Elevation <output data-for="elev"></output></span><input data-q="elev" type="range" min="1" max="90" step="1"></label>
 <label><span>Shininess <output data-for="shine"></output></span><input data-q="shine" type="range" min="1" max="400" step="1"></label>
 <label><span>Highlight <output data-for="spec"></output></span><input data-q="spec" type="range" min="0" max="1" step="0.01"></label>
-<label><span>Fresnel rim <output data-for="rim"></output></span><input data-q="rim" type="range" min="0" max="1" step="0.01"></label>
-<div class="row">
-<label><input type="checkbox" data-term="refraction" checked> refraction</label>
-<label><input type="checkbox" data-term="rim" checked> rim</label>
-<label><input type="checkbox" data-term="spec" checked> highlight</label>
-</div>
+<label><span>Fresnel rim (darkening) <output data-for="rim"></output></span><input data-q="rim" type="range" min="0" max="1" step="0.01"></label>
+<label><span>Environment reflection <output data-for="reflect"></output></span><input data-q="reflect" type="range" min="0" max="3" step="0.05"></label>
 <div class="row"><button type="button" id="bench">Measure 120 moving frames</button><button type="button" id="parity">GPU vs CPU parity</button><button type="button" id="idle">Idle check (1 s)</button></div>
 <p id="readout"></p>
 </form>
@@ -96,8 +115,11 @@ const stats = {};
 const show = () => { $('#readout').textContent = Object.entries(stats).map(([k, v]) => k + ': ' + v).join('\n'); };
 const fmt = (ms) => ms.toFixed(2) + ' ms';
 const params = new URLSearchParams(location.search);
-let preset = params.get('preset') || 'droplet';
-$('#backend').value = params.get('backend') || 'gl';
+// /lab/optics opens on the clear card, the former droplet pages on the droplet
+const path = location.pathname;
+let preset = params.get('preset') || (/\/drop/.test(path) ? 'droplet' : 'clear-card');
+if (params.get('bg')) $('#bg').value = params.get('bg');
+$('#backend').value = params.get('backend') || (path === '/lab/optics/drop' ? 'svg' : 'gl');
 
 const para = 'Light does not merely pass through a drop of water. The curved surface bends every ray toward ' +
   'the centre, so the letters under the drop arrive from a smaller patch of the page and appear larger; ' +
@@ -107,6 +129,28 @@ $('#text').textContent = para;
 function drawPage(c, w, h, dpr) {
   c.width = w; c.height = h;
   const g = c.getContext('2d');
+  const bg = $('#bg').value;
+  if (bg !== 'text') {
+    if (bg === 'checker') {
+      const q = 32 * dpr;
+      for (let y = 0; y < h; y += q) for (let x = 0; x < w; x += q) { g.fillStyle = ((x + y) / q) % 2 ? '#7d8ba3' : '#e9edf2'; g.fillRect(x, y, q, q); }
+    } else if (bg === 'stripes') {
+      g.fillStyle = '#eef1f5'; g.fillRect(0, 0, w, h); g.fillStyle = '#33415a';
+      for (let x = 0; x < w; x += 24 * dpr) g.fillRect(x, 0, 6 * dpr, h);
+    } else if (bg === 'split') {
+      g.fillStyle = '#000'; g.fillRect(0, 0, w / 2, h); g.fillStyle = '#fff'; g.fillRect(w / 2, 0, w / 2, h);
+    } else if (bg === 'gradient') {
+      const gr = g.createLinearGradient(0, 0, w, h); gr.addColorStop(0, '#1d2a44'); gr.addColorStop(0.45, '#9fb4d6'); gr.addColorStop(1, '#f4f6fa');
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    } else if (bg === 'rgb') {
+      ['#e0102f', '#10a050', '#1050e0'].forEach((col, i) => { g.fillStyle = col; g.fillRect(i * w / 3, 0, w / 3 + 1, h); });
+    } else if (bg === 'hub') {
+      g.fillStyle = '#e9edf2'; g.fillRect(0, 0, w, h);
+      const gr = g.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, 'rgba(255,255,255,.6)'); gr.addColorStop(1, 'rgba(200,210,225,.5)');
+      g.fillStyle = gr; g.fillRect(0, 0, w, h);
+    }
+    return;
+  }
   g.fillStyle = '#f7f4ec'; g.fillRect(0, 0, w, h);
   g.fillStyle = '#1c1a17'; g.font = (16 * dpr) + 'px Georgia, "Times New Roman", serif'; g.textBaseline = 'top';
   const pad = 20 * dpr, gap = 28 * dpr, lh = 23 * dpr;
@@ -131,8 +175,11 @@ function drawPage(c, w, h, dpr) {
 // controls <-> the shared query contract (Surface::from_query / to_query)
 const inputs = [...document.querySelectorAll('[data-q]')];
 const term = (t) => document.querySelector('[data-term="' + t + '"]').checked;
+// term switches (ablation) are overrides on the same contract: off = the term's weight 0
 function query() {
-  return 'preset=' + preset + '&' + inputs.map((el) => el.dataset.q + '=' + encodeURIComponent(el.type === 'color' ? el.value.slice(1) : el.value)).join('&');
+  const off = { fresnel: ['reflect', 'rim'], spec: ['spec'], fine: ['fine'], wide: ['wide'], tint: ['tinta'] };
+  const zero = new Set(Object.entries(off).filter(([t]) => !term(t)).flatMap(([, ks]) => ks));
+  return 'preset=' + preset + '&' + inputs.map((el) => el.dataset.q + '=' + (zero.has(el.dataset.q) ? '0' : encodeURIComponent(el.type === 'color' ? el.value.slice(1) : el.value))).join('&');
 }
 function outputs() { inputs.forEach((el) => { const o = document.querySelector('[data-for="' + el.dataset.q + '"]'); if (o) o.textContent = el.value; }); }
 async function loadPreset(name) {
@@ -170,7 +217,7 @@ function glPlace() {
 }
 function glUpdate() {
   r.set_params(query(), dpr);
-  r.set_terms(term('refraction'), term('rim'), term('spec'));
+  r.set_terms(term('refraction'), true, true);
   const w = r.canvas_width(), h = r.canvas_height();
   if (glEl.width !== w || glEl.height !== h) {
     glEl.width = w; glEl.height = h;
@@ -207,8 +254,7 @@ function svgPlace() {
   svgEl.style.transform = 'translate(' + (center[0] - b[0] / 2) / dpr + 'px,' + (center[1] - b[1] / 2) / dpr + 'px)';
 }
 function svgUpdate() {
-  $('#rimL').style.display = term('rim') ? '' : 'none';
-  $('#specL').style.display = term('spec') ? '' : 'none';
+
   loadMap('disp', (obj, h) => {
     const [bw, bh] = h.get('x-a2ui-box').split('x').map(Number);
     svgEl.dataset.box = bw + 'x' + bh;
@@ -232,14 +278,47 @@ function svgUpdate() {
   loadMap('rim', (obj) => { $('#rimL').style.backgroundImage = 'url(' + obj + ')'; });
 }
 
+// the rear light behind the surface: an oversized box (footprint + 0.6·min + 40 each side)
+// at half resolution, fading to zero inside itself (no mask, no clip)
+function footprintCss() {
+  const size = +document.querySelector('[data-q="size"]').value, a = +document.querySelector('[data-q="aspect"]').value;
+  return a >= 1 ? [size * a, size] : [size, size / a];
+}
+const rearSlot = {};
+function rearUpdate() {
+  const el = $('#rear');
+  ['hue', 'sat', 'halo'].forEach((k) => { $('#' + k + 'O').textContent = $('#' + k).value; });
+  el.hidden = !term('rear');
+  if (el.hidden) return;
+  const [fw, fh] = footprintCss();
+  const m = Math.round(0.6 * Math.min(fw, fh)) + 40;
+  const bw = fw + 2 * m, bh = fh + 2 * m;
+  el.style.width = bw + 'px'; el.style.height = bh + 'px'; el.dataset.m = m;
+  const u = '/lab/optics/rear?w=' + Math.ceil(bw / 2) + '&h=' + Math.ceil(bh / 2) + '&hue=' + $('#hue').value + '&sat=' + $('#sat').value + '&halo=' + $('#halo').value + '&strength=' + document.querySelector('[data-q="strength"]').value;
+  if (rearSlot.have === u) return;
+  rearSlot.want = u;
+  fetch(u).then((res) => res.blob()).then((b) => {
+    if (rearSlot.want !== u) return;
+    if (rearSlot.obj) URL.revokeObjectURL(rearSlot.obj);
+    rearSlot.obj = URL.createObjectURL(b); rearSlot.have = u;
+    el.style.backgroundImage = 'url(' + rearSlot.obj + ')';
+  });
+}
+function rearPlace() {
+  const el = $('#rear'); if (el.hidden) return;
+  const [fw, fh] = footprintCss(), m = +el.dataset.m;
+  el.style.transform = 'translate(' + (center[0] / dpr - fw / 2 - m) + 'px,' + (center[1] / dpr - fh / 2 - m) + 'px)';
+}
 function update() {
   outputs();
+  rearUpdate();
   const gl = backend() === 'gl' && r;
   glEl.hidden = !gl; svgEl.hidden = !!gl;
   if (gl) glUpdate(); else svgUpdate();
+  rearPlace();
   history.replaceState(null, '', location.pathname + '?preset=' + preset + '&backend=' + backend());
 }
-function place() { if (backend() === 'gl' && r) glPlace(); else svgPlace(); }
+function place() { if (backend() === 'gl' && r) glPlace(); else svgPlace(); rearPlace(); }
 function resize() {
   dpr = window.devicePixelRatio || 1;
   const w = Math.round(innerWidth * dpr), h = Math.round(innerHeight * dpr);
@@ -254,6 +333,19 @@ function resize() {
 let timer = 0;
 document.addEventListener('input', (e) => { if (e.target.id === 'backend') return; clearTimeout(timer); timer = setTimeout(update, 40); });
 $('#backend').addEventListener('change', update);
+$('#bg').addEventListener('change', () => resize());
+document.querySelectorAll('#sizes button').forEach((b) => b.addEventListener('click', () => {
+  document.querySelector('[data-q="size"]').value = b.dataset.size; document.querySelector('[data-q="aspect"]').value = b.dataset.aspect; update();
+}));
+const STAGE_TERMS = ['refraction', 'fresnel', 'spec', 'fine', 'wide', 'rear', 'tint'];
+document.querySelectorAll('#stages button').forEach((b) => b.addEventListener('click', () => {
+  const n = +b.dataset.stage;
+  STAGE_TERMS.forEach((t, i) => { document.querySelector('[data-term="' + t + '"]').checked = i < n; });
+  update();
+}));
+document.querySelectorAll('#ambients button').forEach((b) => b.addEventListener('click', () => {
+  $('#hue').value = b.dataset.hue; $('#sat').value = b.dataset.sat; update();
+}));
 let rt = 0;
 addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(resize, 120); });
 let grab = null;
@@ -279,7 +371,7 @@ $('#bench').addEventListener('click', () => {
 });
 $('#parity').addEventListener('click', () => {
   if (!r) return;
-  r.set_params(query(), dpr); r.set_terms(term('refraction'), term('rim'), term('spec'));
+  r.set_params(query(), dpr); r.set_terms(term('refraction'), true, true);
   stats['parity'] = r.parity(); glPlace(); show();
 });
 $('#idle').addEventListener('click', () => {

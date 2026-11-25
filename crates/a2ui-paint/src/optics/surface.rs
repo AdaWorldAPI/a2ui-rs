@@ -35,8 +35,11 @@
 //!    light, before the surface reflections of step 6.
 //! 6. **Fresnel and light.** Normal `N = (n·slope, 1)/√(slope²+1)`; Schlick
 //!    `F = F0 + (1 − F0)(1 − N_z)^5` with `F0` of the green index; rim darkening
-//!    `col *= 1 − F·rim`; Blinn-Phong highlight `nh^shininess · min(0.25 + 0.75·F/F0, 4) ·
-//!    intensity`, white over.
+//!    `col *= 1 − F·rim`; environment reflection `r = F·reflection` and Blinn-Phong highlight
+//!    `h = nh^shininess · min(0.25 + 0.75·F/F0, 4) · intensity`, both white over
+//!    (`col = col·(1 − r) + r`, then `col = col·(1 − h) + h`).
+//! 7. **Strength.** [`Surface::strength`] multiplies the offsets, the scattering widths, the
+//!    tint, rim, highlight and reflection ([`Surface::effective`]); 0 is a plain surface.
 //!
 //! All lengths are in px of the target; a renderer at device pixel ratio `k` uses
 //! [`Surface::scaled`]`(k)`.
@@ -158,6 +161,21 @@ impl Tint {
     };
 }
 
+/// The terms every backend draws at the surface's strength ([`Surface::effective`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Effective {
+    /// Key light with intensity and rim scaled.
+    pub light: KeyLight,
+    /// Environment reflection.
+    pub reflection: f32,
+    /// Tint opacity.
+    pub tint_alpha: f32,
+    /// Fine kernel σ, px.
+    pub fine_sigma: f32,
+    /// Wide kernel σ, px.
+    pub wide_sigma: f32,
+}
+
 /// A complete optical surface.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Surface {
@@ -175,6 +193,14 @@ pub struct Surface {
     pub tint: Tint,
     /// Key light.
     pub light: KeyLight,
+    /// Reflection of a bright, uniform environment: white over the transmitted light with
+    /// alpha `F · reflection` (F0 on a flat face, rising on the shoulder). Independent of the
+    /// key light.
+    pub reflection: f32,
+    /// Effect strength `[0, 1]`: the master of every optical term. Offsets, scattering
+    /// widths, tint, rim, highlight and reflection scale with it; 0 is a plain, neutral
+    /// surface (plan gate G3).
+    pub strength: f32,
 }
 
 /// The named presets, in the visual acceptance order.
@@ -263,11 +289,11 @@ pub struct SurfaceMaps {
     pub height: u32,
     /// Displacement: direction × green offset, R = x, G = y around 128.
     pub displacement: Vec<u8>,
-    /// Specular highlight, white, intensity in alpha.
+    /// Environment reflection and highlight, white, combined coverage in alpha.
     pub specular: Vec<u8>,
     /// Fresnel rim, black, reflectance × rim in alpha.
     pub rim: Vec<u8>,
-    /// `feDisplacementMap` scale per channel: `2 × max |off_c|`.
+    /// `feDisplacementMap` scale per channel: `2 × max |off_c|` (0 at strength 0).
     pub channel_scales: [f32; 3],
 }
 
@@ -293,8 +319,10 @@ impl Surface {
                 elevation_deg: 40.0,
                 shininess: 40.0,
                 intensity: 0.35,
-                rim: 0.35,
+                rim: 0.0,
             },
+            reflection: 1.0,
+            strength: 1.0,
         };
         Some(match name {
             "droplet" => Self {
@@ -309,6 +337,7 @@ impl Surface {
                 medium: Medium::WATER,
                 scatter: Scatter::CLEAR,
                 light: KeyLight::DEFAULT,
+                reflection: 0.0,
                 ..card
             },
             "capsule" => Self {
@@ -321,6 +350,7 @@ impl Surface {
                     base: 0.0,
                 },
                 light: KeyLight::DEFAULT,
+                reflection: 0.0,
                 ..card
             },
             "clear-card" => card,
@@ -376,7 +406,8 @@ impl Surface {
     /// `size` (shorter side, px), `aspect`, `corner`, `height`, `face`, `shoulder`, `profile`,
     /// `base`, `medium` (`water|glass|diamond`), `ior`, `abbe`, `disp`, `direct`, `fine`,
     /// `wide`, `fsig`, `wsig`, `tint` (`rrggbb`), `tinta`, `light`, `elev`, `shine`, `spec`,
-    /// `rim`. Unknown keys and unparsable or non-finite values are ignored; values are
+    /// `rim`, `reflect`, `strength`; and `w`, `h` (box in px, overriding `size` / `aspect`)
+    /// and `cornerpx` (corner radius in px). Unknown keys and unparsable or non-finite values are ignored; values are
     /// clamped to safe ranges. The one parameter contract of the server maps and the GPU.
     #[must_use]
     pub fn from_query(raw: &str) -> Self {
@@ -393,6 +424,8 @@ impl Surface {
         let short = s.footprint.width.min(s.footprint.height);
         let aspect = s.footprint.width / s.footprint.height.max(1e-3);
         let (mut size, mut asp) = (short, aspect);
+        let (mut w_px, mut h_px, mut has_w, mut has_h) = (0.0f32, 0.0f32, false, false);
+        let mut corner_px: Option<f32> = None;
         for (k, v) in pairs {
             let n = v.parse::<f32>().ok().filter(|x| x.is_finite());
             let set = |t: &mut f32, lo: f32, hi: f32| {
@@ -442,6 +475,19 @@ impl Surface {
                 "shine" => set(&mut s.light.shininess, 1.0, 1000.0),
                 "spec" => set(&mut s.light.intensity, 0.0, 1.0),
                 "rim" => set(&mut s.light.rim, 0.0, 1.0),
+                "reflect" => set(&mut s.reflection, 0.0, 4.0),
+                "strength" => set(&mut s.strength, 0.0, 1.0),
+                "w" => {
+                    set(&mut w_px, 1.0, 4000.0);
+                    has_w = n.is_some();
+                }
+                "h" => {
+                    set(&mut h_px, 1.0, 4000.0);
+                    has_h = n.is_some();
+                }
+                "cornerpx" => {
+                    corner_px = n.map(|x| x.max(0.0));
+                }
                 _ => {}
             }
         }
@@ -449,6 +495,21 @@ impl Surface {
             corner: s.footprint.corner,
             ..Footprint::from_aspect(size, asp, 0.0)
         };
+        // explicit box size (`w`, `h`, px) overrides `size` / `aspect`
+        if has_w {
+            s.footprint.width = w_px;
+        }
+        if has_h {
+            s.footprint.height = h_px;
+        }
+        if let Some(px) = corner_px {
+            let rin = s.footprint.inradius();
+            s.footprint.corner = if rin > 0.0 {
+                (px / rin).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+        }
         s
     }
 
@@ -469,9 +530,9 @@ impl Surface {
             q.push_str(&format!("&abbe={v}"));
         }
         q.push_str(&format!(
-            "&disp={}&direct={}&fine={}&wide={}&fsig={}&wsig={}&tint={r:02x}{g:02x}{b:02x}&tinta={}&light={}&elev={}&shine={}&spec={}&rim={}",
+            "&disp={}&direct={}&fine={}&wide={}&fsig={}&wsig={}&tint={r:02x}{g:02x}{b:02x}&tinta={}&light={}&elev={}&shine={}&spec={}&rim={}&reflect={}&strength={}",
             self.dispersion, sc.direct, sc.fine, sc.wide, sc.fine_sigma, sc.wide_sigma,
-            self.tint.alpha, l.angle_deg, l.elevation_deg, l.shininess, l.intensity, l.rim
+            self.tint.alpha, l.angle_deg, l.elevation_deg, l.shininess, l.intensity, l.rim, self.reflection, self.strength
         ));
         q
     }
@@ -540,9 +601,83 @@ impl Surface {
     pub fn offsets(&self, p: [f32; 2]) -> [f32; 3] {
         let sp = self.point(p);
         let travel = sp.height + self.relief.base.max(0.0);
+        let s = self.strength();
         self.medium
             .channel_iors(self.dispersion)
-            .map(|n| refract_offset(sp.slope, travel, n))
+            .map(|n| refract_offset(sp.slope, travel, n) * s)
+    }
+
+    /// The effect strength, clamped to `[0, 1]`; non-finite is 0 (no effect).
+    #[must_use]
+    pub fn strength(&self) -> f32 {
+        if self.strength.is_finite() {
+            self.strength.clamp(0.0, 1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// The light, rim, reflection, tint and scattering widths at this strength: what every
+    /// backend draws (offsets already carry the strength, see [`Self::offsets`]).
+    #[must_use]
+    pub fn effective(&self) -> Effective {
+        let s = self.strength();
+        Effective {
+            light: KeyLight {
+                intensity: self.light.intensity.clamp(0.0, 1.0) * s,
+                rim: self.light.rim.clamp(0.0, 1.0) * s,
+                ..self.light
+            },
+            reflection: self.reflection.max(0.0) * s,
+            tint_alpha: self.tint.alpha.clamp(0.0, 1.0) * s,
+            fine_sigma: self.scatter.fine_sigma.max(0.0) * s,
+            wide_sigma: self.scatter.wide_sigma.max(0.0) * s,
+        }
+    }
+
+    /// This surface with every non-finite number replaced by the clear card's (a NaN strength
+    /// is no effect), so a caller's NaN can never reach a map or a shader.
+    #[must_use]
+    pub fn sanitized(&self) -> Self {
+        let d = Self::preset("clear-card").expect("clear-card preset");
+        let f = |v: f32, dv: f32| if v.is_finite() { v } else { dv };
+        let mut s = *self;
+        s.footprint.width = f(s.footprint.width, d.footprint.width);
+        s.footprint.height = f(s.footprint.height, d.footprint.height);
+        s.footprint.corner = f(s.footprint.corner, d.footprint.corner);
+        let (r, dr) = (&mut s.relief, d.relief);
+        r.height = f(r.height, dr.height);
+        r.face = f(r.face, dr.face);
+        r.shoulder = f(r.shoulder, dr.shoulder);
+        r.profile = f(r.profile, dr.profile);
+        r.base = f(r.base, dr.base);
+        s.medium.ior = f(s.medium.ior, d.medium.ior);
+        s.dispersion = f(s.dispersion, 0.0);
+        let (c, dc) = (&mut s.scatter, d.scatter);
+        c.direct = f(c.direct, dc.direct);
+        c.fine = f(c.fine, dc.fine);
+        c.wide = f(c.wide, dc.wide);
+        c.fine_sigma = f(c.fine_sigma, dc.fine_sigma);
+        c.wide_sigma = f(c.wide_sigma, dc.wide_sigma);
+        s.tint.alpha = f(s.tint.alpha, 0.0);
+        let (l, dl) = (&mut s.light, d.light);
+        l.angle_deg = f(l.angle_deg, dl.angle_deg);
+        l.elevation_deg = f(l.elevation_deg, dl.elevation_deg);
+        l.shininess = f(l.shininess, dl.shininess);
+        l.intensity = f(l.intensity, dl.intensity);
+        l.rim = f(l.rim, dl.rim);
+        s.reflection = f(s.reflection, d.reflection);
+        s.strength = f(s.strength, 0.0);
+        s
+    }
+
+    /// Centre magnification for the green index, `1 / (1 + off′(0))` from the offset's slope
+    /// at the centre along the shorter axis (1 on a flat face).
+    #[must_use]
+    pub fn centre_magnification(&self) -> f32 {
+        let e = (self.footprint.inradius() * 0.01).max(1e-3);
+        let a = self.offsets([e, 0.0])[1].min(self.offsets([0.0, e])[1]);
+        1.0 / (1.0 + a / e)
     }
 
     /// Where the page is sampled for the pixel at `p` (relative to the centre), per channel:
@@ -567,19 +702,21 @@ impl Surface {
     /// The SVG path's maps (spec steps 3 and 5; scattering and tint are filter / CSS terms).
     #[must_use]
     pub fn render_maps(&self) -> SurfaceMaps {
-        let (bw, bh) = self.map_box();
+        let this = self.sanitized();
+        let this = &this;
+        let (bw, bh) = this.map_box();
         let (w, h) = (bw as usize, bh as usize);
         let mut offs = vec![[0.0f32; 3]; w * h];
         let mut pts = vec![None; w * h];
         let mut maxes = [0.0f32; 3];
         for y in 0..h {
             for x in 0..w {
-                let p = self.box_point(x, y);
-                let sp = self.point(p);
+                let p = this.box_point(x, y);
+                let sp = this.point(p);
                 if sp.sd >= 0.0 {
                     continue;
                 }
-                let o = self.offsets(p);
+                let o = this.offsets(p);
                 for c in 0..3 {
                     maxes[c] = maxes[c].max(o[c].abs());
                 }
@@ -590,8 +727,9 @@ impl Surface {
         let mut displacement = NEUTRAL_DISPLACEMENT.repeat(w * h);
         let mut specular = vec![0u8; w * h * 4];
         let mut rim = vec![0u8; w * h * 4];
-        let f0 = self.f0();
-        let hv = half_vector(&self.light);
+        let f0 = this.f0();
+        let eff = this.effective();
+        let hv = half_vector(&eff.light);
         for (k, sp) in pts.iter().enumerate() {
             let Some(sp) = sp else { continue };
             let i = k * 4;
@@ -602,9 +740,12 @@ impl Surface {
             };
             displacement[i] = (128.0 + 127.0 * m * sp.out[0]).round() as u8;
             displacement[i + 1] = (128.0 + 127.0 * m * sp.out[1]).round() as u8;
-            let (fres, spec) = shade(sp, f0, hv, &self.light);
-            specular[i..i + 4].copy_from_slice(&[255, 255, 255, (spec * 255.0).round() as u8]);
-            rim[i + 3] = ((fres * self.light.rim).clamp(0.0, 1.0) * 255.0).round() as u8;
+            let (fres, spec) = shade(sp, f0, hv, &eff.light);
+            // environment reflection and highlight, both white over: one layer
+            let refl = (fres * eff.reflection).clamp(0.0, 1.0);
+            let white = 1.0 - (1.0 - refl) * (1.0 - spec);
+            specular[i..i + 4].copy_from_slice(&[255, 255, 255, (white * 255.0).round() as u8]);
+            rim[i + 3] = ((fres * eff.light.rim).clamp(0.0, 1.0) * 255.0).round() as u8;
         }
         SurfaceMaps {
             width: bw,
@@ -685,24 +826,27 @@ pub fn shade(sp: &SurfacePoint, f0: f32, hv: [f32; 3], light: &KeyLight) -> (f32
 
 #[cfg(test)]
 mod tests {
-    use super::super::Droplet;
     use super::*;
+
+    /// The spherical cap of footprint radius `a` and apex `h` at radius `r`, closed form:
+    /// (height, slope).
+    fn cap(a: f32, h: f32, r: f32) -> (f32, f32) {
+        let rs = (a * a + h * h) / (2.0 * h);
+        let root = (rs * rs - r * r).sqrt();
+        (root - (rs - h), r / root)
+    }
 
     fn droplet() -> Surface {
         Surface::preset("droplet").unwrap()
     }
 
-    /// The droplet preset is the droplet: same height, slope and offsets as `Droplet`.
+    /// The droplet preset is a spherical cap: same height and slope as the closed form.
     #[test]
     fn the_droplet_preset_is_the_droplet() {
         let s = droplet();
-        let d = Droplet {
-            radius: 90.0,
-            height: 76.5,
-        };
         for r in [0.0f32, 10.0, 45.5, 80.0, 89.0] {
             let sp = s.point([r, 0.0]);
-            let (h, slope) = d.surface(r).unwrap();
+            let (h, slope) = cap(90.0, 76.5, r);
             assert!(
                 (sp.height - h).abs() < 1e-3,
                 "h at {r}: {} vs {h}",
@@ -892,6 +1036,309 @@ mod tests {
         assert_eq!(s.coverage([0.0, 0.0]), 1.0);
         assert!((s.coverage([edge, 0.0]) - 0.5).abs() < 1e-5);
         assert_eq!(s.coverage([edge + 1.0, 0.0]), 0.0);
+    }
+
+    fn alpha_of(rgba: &[u8]) -> Vec<u8> {
+        rgba.as_chunks::<4>().0.iter().map(|p| p[3]).collect()
+    }
+
+    #[test]
+    fn f0_is_four_percent_at_ior_one_and_a_half() {
+        let mut s = Surface::preset("clear-card").unwrap();
+        s.medium = Medium {
+            ior: 1.5,
+            abbe: None,
+        };
+        assert!((s.f0() - 0.04).abs() < 1e-6);
+    }
+
+    /// The shoulder rises from 0 at the edge to the full height, monotonically.
+    #[test]
+    fn the_shoulder_rises_from_the_edge_to_the_face() {
+        for p in [1.0, 2.0, 4.0] {
+            let mut s = Surface::preset("clear-card").unwrap();
+            s.relief.profile = p;
+            let (h0, _) = s.relief_at(0.0);
+            let (h1, _) = s.relief_at(s.relief.shoulder);
+            // the squircle rises steeply: (4e-4)^(1/4) = 0.14 of H at the clamped first step
+            assert!(h0 < 0.15 * s.relief.height, "p {p}: {h0}");
+            assert!((h1 - s.relief.height).abs() < 1e-4, "p {p}: {h1}");
+            let mut last = -1.0;
+            for i in 0..=34 {
+                let (h, _) = s.relief_at(i as f32 * 0.5);
+                assert!(h >= last, "p {p} at {i}");
+                last = h;
+            }
+        }
+    }
+
+    /// On a flat-faced card the maps displace only on the shoulder.
+    #[test]
+    fn a_flat_card_displaces_only_on_the_shoulder() {
+        let s = Surface::preset("clear-card").unwrap();
+        let m = s.render_maps();
+        let (w, h) = (m.width as usize, m.height as usize);
+        let at = |x: usize, y: usize| {
+            [
+                m.displacement[(y * w + x) * 4],
+                m.displacement[(y * w + x) * 4 + 1],
+            ]
+        };
+        assert_eq!(at(w / 2, h / 2), [128, 128], "the face does not displace");
+        assert_ne!(at(w / 2, 4), [128, 128], "the shoulder does");
+        assert_eq!(at(0, 0), [128, 128], "outside the footprint");
+    }
+
+    /// The highlight follows the key light: with the light from above the top shoulder
+    /// glints and the bottom does not; turning the light turns it round.
+    #[test]
+    fn the_highlight_follows_the_key_light() {
+        let mut s = Surface::preset("clear-card").unwrap();
+        s.reflection = 0.0;
+        s.light.angle_deg = -90.0;
+        let glint = |s: &Surface| {
+            let m = s.render_maps();
+            let w = m.width as usize;
+            let a = |x: usize, y: usize| m.specular[(y * w + x) * 4 + 3];
+            let top = (2..12).map(|y| a(w / 2, y)).max().unwrap();
+            let bottom = (m.height as usize - 12..m.height as usize - 2)
+                .map(|y| a(w / 2, y))
+                .max()
+                .unwrap();
+            (top, bottom)
+        };
+        let (top, bottom) = glint(&s);
+        assert!(top > 20 && bottom < top / 4, "top {top} bottom {bottom}");
+        s.light.angle_deg = 90.0;
+        let (top, bottom) = glint(&s);
+        assert!(bottom > 20 && top < bottom / 4, "top {top} bottom {bottom}");
+    }
+
+    /// The environment reflection is F0 on the face and rises on the shoulder; it does not
+    /// move with the key light.
+    #[test]
+    fn the_reflection_is_f0_on_the_face_and_rises_on_the_shoulder() {
+        let mut s = Surface::preset("clear-card").unwrap();
+        s.light.intensity = 0.0;
+        let m = s.render_maps();
+        let w = m.width as usize;
+        let a = |m: &SurfaceMaps, x: usize, y: usize| m.specular[(y * w + x) * 4 + 3];
+        let face = a(&m, w / 2, m.height as usize / 2);
+        assert_eq!(face, (s.f0() * 255.0).round() as u8);
+        let shoulder = (1..18).map(|y| a(&m, w / 2, y)).max().unwrap();
+        assert!(shoulder > face + 5, "shoulder {shoulder} face {face}");
+        s.light.angle_deg += 90.0;
+        assert_eq!(
+            s.render_maps().specular,
+            m.specular,
+            "independent of the key light"
+        );
+    }
+
+    /// G3: strength 0 equals a neutral baseline built independently: neutral displacement,
+    /// zero scales, transparent layers, no tint, no scattering widths.
+    #[test]
+    fn strength_zero_equals_the_neutral_baseline() {
+        for p in PRESETS {
+            let s = Surface {
+                strength: 0.0,
+                ..Surface::preset(p).unwrap()
+            };
+            let m = s.render_maps();
+            let n = (m.width * m.height) as usize;
+            assert_eq!(m.displacement, NEUTRAL_DISPLACEMENT.repeat(n), "{p}");
+            assert!(alpha_of(&m.specular).iter().all(|&a| a == 0), "{p}");
+            assert!(alpha_of(&m.rim).iter().all(|&a| a == 0), "{p}");
+            assert_eq!(m.channel_scales, [0.0; 3], "{p}");
+            let e = s.effective();
+            assert_eq!(
+                (e.tint_alpha, e.fine_sigma, e.wide_sigma, e.reflection),
+                (0.0, 0.0, 0.0, 0.0)
+            );
+            assert_eq!(s.sample_points([10.0, 5.0]), [[10.0, 5.0]; 3], "{p}");
+            // and full strength is not the baseline
+            let on = Surface::preset(p).unwrap().render_maps();
+            assert_ne!(on.displacement, m.displacement, "{p}");
+        }
+    }
+
+    /// G3 continuity: every term scales with strength, so a tiny strength stays within one
+    /// 8-bit step of neutral (catches a term that ignores strength).
+    #[test]
+    fn a_tiny_strength_stays_within_one_step_of_neutral() {
+        let s = Surface {
+            strength: 1e-3,
+            ..Surface::preset("aqua").unwrap()
+        };
+        let m = s.render_maps();
+        assert!(
+            alpha_of(&m.specular).iter().all(|&a| a <= 1),
+            "highlight or reflection ignores strength"
+        );
+        assert!(
+            m.channel_scales.iter().all(|&c| c < 0.1),
+            "{:?}",
+            m.channel_scales
+        );
+        let e = s.effective();
+        assert!(e.tint_alpha < 1e-3 && e.wide_sigma < 0.05, "{e:?}");
+        let full = Surface::preset("aqua").unwrap().render_maps();
+        assert!(alpha_of(&full.specular).iter().any(|&a| a > 1));
+    }
+
+    /// Non-finite numbers never reach the maps; a NaN strength is no effect.
+    #[test]
+    fn non_finite_values_never_reach_the_maps() {
+        let card = Surface::preset("clear-card").unwrap();
+        let mut bad = card;
+        bad.relief.height = f32::NAN;
+        bad.medium.ior = f32::INFINITY;
+        assert_eq!(bad.render_maps(), card.render_maps());
+        let nan = Surface {
+            strength: f32::NAN,
+            ..card
+        };
+        assert_eq!(
+            nan.render_maps(),
+            Surface {
+                strength: 0.0,
+                ..card
+            }
+            .render_maps()
+        );
+    }
+
+    /// The droplet refracts inwards everywhere inside, and not at the centre or the rim.
+    #[test]
+    fn a_droplet_refracts_inwards_and_vanishes_at_centre_and_rim() {
+        let s = droplet();
+        assert_eq!(s.offsets([0.0, 0.0])[1], 0.0);
+        let inner: Vec<f32> = (1..90).map(|r| s.offsets([r as f32, 0.0])[1]).collect();
+        assert!(inner.iter().all(|&v| v < 0.0));
+        let peak = inner.iter().cloned().fold(0.0f32, f32::min);
+        assert!(
+            peak < -1.0 && inner[0] > peak && inner[inner.len() - 1] > peak,
+            "{peak}"
+        );
+    }
+
+    /// A taller drop magnifies more; a flat one not at all; a hemisphere by exactly n.
+    #[test]
+    fn magnification_follows_height_and_a_hemisphere_gives_the_index() {
+        let mag = |h: f32| {
+            Surface {
+                relief: Relief {
+                    height: h,
+                    ..droplet().relief
+                },
+                ..droplet()
+            }
+            .centre_magnification()
+        };
+        let (flat, low, high) = (mag(0.5), mag(20.0), mag(60.0));
+        assert!((flat - 1.0).abs() < 0.01, "flat {flat}");
+        assert!(1.0 < low && low < high, "low {low} high {high}");
+        for m in [Medium::WATER, Medium::CROWN_GLASS, Medium::DIAMOND] {
+            let hemi = Surface {
+                relief: Relief {
+                    height: 90.0,
+                    ..droplet().relief
+                },
+                medium: m,
+                ..droplet()
+            };
+            let x = hemi.centre_magnification();
+            assert!((x / m.ior - 1.0).abs() < 0.01, "n {} gives {x}", m.ior);
+        }
+        assert!(
+            (Surface::preset("clear-card")
+                .unwrap()
+                .centre_magnification()
+                - 1.0)
+                .abs()
+                < 1e-6
+        );
+    }
+
+    #[test]
+    fn denser_media_refract_more() {
+        let max = |m: Medium| {
+            Surface {
+                medium: m,
+                ..droplet()
+            }
+            .render_maps()
+            .channel_scales[1]
+        };
+        assert!(max(Medium::WATER) < max(Medium::CROWN_GLASS));
+        assert!(max(Medium::CROWN_GLASS) < max(Medium::DIAMOND));
+    }
+
+    /// The per-channel scales are ordered by wavelength and equal without dispersion; the map
+    /// is the green index in both.
+    #[test]
+    fn channel_scales_split_only_with_dispersion() {
+        let m = Surface {
+            dispersion: 1.0,
+            ..droplet()
+        }
+        .render_maps();
+        let [r, g, b] = m.channel_scales;
+        assert!(r < g && g < b, "{:?}", m.channel_scales);
+        let none = droplet().render_maps();
+        assert_eq!(none.channel_scales, [none.channel_scales[1]; 3]);
+        assert_eq!(m.displacement, none.displacement);
+    }
+
+    /// The highlight sits on the side facing the key light; the Fresnel rim rises at the
+    /// contact line of a steep drop.
+    #[test]
+    fn the_droplet_highlight_faces_the_light_and_the_rim_is_at_the_edge() {
+        let m = droplet().render_maps();
+        let n = m.width as usize;
+        let a = |buf: &[u8], x: usize, y: usize| buf[(y * n + x) * 4 + 3];
+        let (mut best, mut at) = (0u8, (0, 0));
+        for y in 0..n {
+            for x in 0..n {
+                if a(&m.specular, x, y) > best {
+                    best = a(&m.specular, x, y);
+                    at = (x, y);
+                }
+            }
+        }
+        assert!(best > 100, "{best}");
+        assert!(
+            at.0 < n / 2 && at.1 < n / 2,
+            "light from the upper left, highlight at {at:?}"
+        );
+        assert_eq!(a(&m.rim, 0, 0), 0);
+        let tall = Surface {
+            footprint: Footprint::from_aspect(120.0, 1.0, 1.0),
+            relief: Relief {
+                height: 55.0,
+                ..droplet().relief
+            },
+            ..droplet()
+        }
+        .render_maps();
+        let t = tall.width as usize;
+        let ra = |x: usize| tall.rim[((t / 2) * t + x) * 4 + 3];
+        assert!(
+            ra(t / 2 + 58) > 2 * ra(t / 2 + 20),
+            "{} vs {}",
+            ra(t / 2 + 58),
+            ra(t / 2 + 20)
+        );
+    }
+
+    #[test]
+    fn query_keys_for_box_corner_strength_and_reflection() {
+        let s = Surface::from_query(
+            "preset=clear-card&w=420&h=200&cornerpx=28&strength=0.53&reflect=0.5",
+        );
+        assert_eq!((s.footprint.width, s.footprint.height), (420.0, 200.0));
+        assert!((s.footprint.corner_px() - 28.0).abs() < 1e-4);
+        assert_eq!((s.strength, s.reflection), (0.53, 0.5));
     }
 
     #[test]

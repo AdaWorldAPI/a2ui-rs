@@ -1,0 +1,376 @@
+/* ---------------------------------------------------------------------------
+ * RPT-AQUA-GLASS-1 (draft): "Aqua Glass", material key `aqua-glass`
+ * (menu "Aqua Glass (Entwurf)"). Holo Glass V2 stays the default.
+ *
+ * A small light model, not decorations. One material, lit by one key light (and, for what is
+ * active, a rear light). Every term is a spatial field derived from a few physical parameters;
+ * nothing traces the card's outline:
+ *
+ *   L = L_ambient + L_transmission + L_caustics - L_shadow   (+ L_rear for an active surface)
+ *
+ *   key light   --aqua-azimuth: where the key light comes from (0 = straight above, negative
+ *               = from the left). Its direction moves every kernel below.
+ *   ambient     the scene behind the glass (theme background, steel cast, light from above)
+ *   transmission  scene light refracted through the face: a broad interior maximum,
+ *               shifted towards the key light
+ *   caustics    the plate's edges focus light into the far edge, concentrated at its corners;
+ *               the corner away from the light is stronger. The same kernels carry the rear
+ *               light when there is one (one material, two illuminations).
+ *   shadow      suspension: offset away from the light by the height (--aqua-depth), its blur
+ *               growing with the height. Diffuse, never a contact edge.
+ *   rear        an active surface is lit from behind, a diffuse underlight behind milk glass:
+ *               a broad soft source beneath and behind its lower-left corner with a brighter
+ *               core, a subtle neutral concentration where the glass focuses it, decaying into
+ *               the glass. Confined to the surface's own shape: no outline, no glow outside.
+ *   prism light a caustic of the key light: a dominant white core with a short, asymmetric
+ *               falloff; dispersion only as a muted fringe where its short tail fades. Never a
+ *               ribbon across the page.
+ *
+ * Kernels are elliptical fields in card-relative coordinates, so the signature holds for every
+ * card size. --aqua-strength is the master (0 = a plain neutral interface). The ambient colour
+ * (--aqua-hue/--aqua-sat) only colours the rear light; the material and its neutral light are
+ * the same for every colour. Typography is never attenuated.
+ *
+ * Diagnostic switches (--aqua-l-*, 1 = on) let the Material-Labor render each term alone.
+ * Ablation of the three mechanisms: ?aqua-off=glass,rear,beam (aqua-optics.js). Rear and prism
+ * light are additive over the neutral glass: with both off the glass is unchanged.
+ * --------------------------------------------------------------------------- */
+:root[data-material="aqua-glass"] {
+  /* Personal atmosphere (prefs::Aqua::DEFAULT); <html style> overrides. */
+  --aqua-hue: 352;
+  --aqua-sat: .75;
+  --aqua-strength: .53;
+  --aqua-transmission: .85;
+  --aqua-glare: .53;
+  --aqua-halo: .45;
+  --aqua-depth: .55;
+  /* The key light. */
+  --aqua-azimuth: -18deg;
+  --aqua-lx: sin(var(--aqua-azimuth));   /* < 0: light from the left */
+  --aqua-ly: cos(var(--aqua-azimuth));   /* > 0: light from above */
+  /* Diagnostic layer switches. */
+  --aqua-l-env: 1;
+  --aqua-l-trans: 1;
+  --aqua-l-caustic: 1;
+  --aqua-l-beam: 1;
+  --aqua-l-rear: 1;
+  --aqua-l-body: 1;
+  --aqua-l-shadow: 1;
+  --aqua-l-glass: 1;
+  --aqua-radius: 14px;
+
+  --aqua-s-env: calc(var(--aqua-strength) * var(--aqua-l-env));
+  --aqua-s-trans: calc(var(--aqua-strength) * var(--aqua-transmission) * var(--aqua-l-trans));
+  --aqua-s-caustic: calc(var(--aqua-strength) * var(--aqua-l-caustic));
+  --aqua-s-shadow: calc(var(--aqua-strength) * var(--aqua-l-shadow));
+  --aqua-s-rear: calc(var(--aqua-strength) * var(--aqua-halo) * var(--aqua-l-rear));
+
+  /* The rear light source. Low saturation (Crystal, Titanium) moves it towards white light. */
+  --aqua-rear: hsl(var(--aqua-hue) calc(var(--aqua-sat) * 100%) calc(62% + (1 - var(--aqua-sat)) * 32%));
+
+  /* body: glass passes most light; at strength 0 it is an ordinary (nearly opaque) card. */
+  --aqua-glass: color-mix(in srgb, var(--card-bg)
+    calc(max(.12, .9 - var(--aqua-transmission) * var(--aqua-strength) * 1.45) * var(--aqua-l-body) * 100%),
+    transparent);
+
+  /* transmission: broad interior maximum, shifted towards the key light. */
+  --aqua-k-trans:
+    radial-gradient(ellipse 64% 42% at calc(50% + var(--aqua-lx) * 12%) calc(46% - var(--aqua-ly) * 18%),
+      rgb(255 255 255 / calc(var(--aqua-s-trans) * .78)), rgb(255 255 255 / 0) 100%);
+
+  /* caustics: the far edge from the light (the bottom, for light from above), concentrated at
+     its two corners; the corner away from the light is stronger. Weights from the azimuth. */
+  --aqua-w-right: clamp(.15, calc(.5 - var(--aqua-lx) * 1.4), 1);
+  --aqua-w-left: clamp(.15, calc(.5 + var(--aqua-lx) * 1.4), 1);
+  --aqua-k-corner:
+    radial-gradient(ellipse 22% 30% at 91% 87%,
+      rgb(255 255 255 / calc(var(--aqua-s-caustic) * var(--aqua-ly) * var(--aqua-w-right) * 1.05)), rgb(255 255 255 / 0) 100%),
+    radial-gradient(ellipse 20% 28% at 9% 87%,
+      rgb(255 255 255 / calc(var(--aqua-s-caustic) * var(--aqua-ly) * var(--aqua-w-left) * 1.05)), rgb(255 255 255 / 0) 100%);
+  /* Fallback without the generated optics: the edges themselves as lenses, approximated by
+     narrow zones near the corners. With the optics these come from the normal field. */
+  --aqua-k-edge:
+    radial-gradient(ellipse 22% 6% at 13% 100%,
+      rgb(255 255 255 / calc(var(--aqua-s-caustic) * var(--aqua-ly) * var(--aqua-w-left) * 2.2)), rgb(255 255 255 / 0) 100%),
+    radial-gradient(ellipse 20% 6% at 87% 100%,
+      rgb(255 255 255 / calc(var(--aqua-s-caustic) * var(--aqua-ly) * var(--aqua-w-right) * 1.4)), rgb(255 255 255 / 0) 100%),
+    radial-gradient(ellipse 3.5% 42% at 0% 62%,
+      rgb(255 255 255 / calc(var(--aqua-s-caustic) * var(--aqua-w-left) * 1.6)), rgb(255 255 255 / 0) 100%),
+    radial-gradient(ellipse 3% 36% at 100% 58%,
+      rgb(255 255 255 / calc(var(--aqua-s-caustic) * var(--aqua-w-right) * .9)), rgb(255 255 255 / 0) 100%);
+  --aqua-k-caustic: var(--aqua-k-corner), var(--aqua-k-edge);
+  /* rear light: a diffuse underlight behind milk glass, like a soft umbrella light in a
+     studio. A broad soft source beneath and behind the lower-left corner (its centre outside
+     the surface, so only its upper-right part shines through), a smaller, brighter core in
+     it, and a subtle neutral concentration where the glass focuses the light at the corner.
+     The milk glass desaturates what it transmits; the core moves towards white. */
+  --aqua-rear-k: min(1, calc(var(--aqua-s-rear) * 3.2));
+  --aqua-rear-milk: color-mix(in srgb, #fff 30%, var(--aqua-rear));
+  --aqua-k-rear:
+    radial-gradient(ellipse 10% 24% at 0% 100%,
+      rgb(255 255 255 / calc(var(--aqua-rear-k) * .6)), rgb(255 255 255 / 0) 100%),
+    radial-gradient(ellipse 26% 58% at 2% 104%,
+      color-mix(in srgb, color-mix(in srgb, #fff 55%, var(--aqua-rear)) calc(var(--aqua-rear-k) * 78%), transparent),
+      color-mix(in srgb, var(--aqua-rear-milk) calc(var(--aqua-rear-k) * 22%), transparent) 55%,
+      transparent 100%),
+    radial-gradient(ellipse 96% 150% at -6% 118%,
+      color-mix(in srgb, var(--aqua-rear-milk) calc(var(--aqua-rear-k) * 52%), transparent),
+      color-mix(in srgb, var(--aqua-rear-milk) calc(var(--aqua-rear-k) * 20%), transparent) 40%,
+      color-mix(in srgb, var(--aqua-rear-milk) calc(var(--aqua-rear-k) * 6%), transparent) 70%,
+      transparent 100%);
+
+  /* shadow: suspension, offset away from the light by the height; blur grows with height. */
+  --aqua-h: calc(var(--aqua-depth) * var(--aqua-strength));
+  --aqua-suspension:
+    0 1px 2px -1px rgb(30 40 58 / calc(.04 + var(--aqua-s-shadow) * .04)),
+    calc(var(--aqua-lx) * -40px * var(--aqua-h)) calc(var(--aqua-ly) * (16px + 90px * var(--aqua-h)))
+      calc(56px + 180px * var(--aqua-h)) calc(-22px - 30px * var(--aqua-h))
+      rgb(30 40 58 / calc(.06 + var(--aqua-s-shadow) * .26));
+}
+
+/* ambient: the theme's own background with a steel cast and light from above. */
+:root[data-material="aqua-glass"] body {
+  position: relative;
+  isolation: isolate;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / calc(var(--aqua-s-env) * .55)) 0%, rgb(255 255 255 / 0) 45%),
+    linear-gradient(90deg, rgb(70 80 110 / calc(var(--aqua-s-env) * .16)) 0%, rgb(70 80 110 / 0) 22%),
+    color-mix(in srgb, #d6dbea calc(min(1, var(--aqua-s-env) * 1.15) * 100%), var(--bg));
+  background-attachment: fixed;
+}
+:root[data-material="aqua-glass"] .a2-shell { background: transparent; }
+
+/* prismatic light: a localized caustic, a white core (::before) and a short fringe where its
+   tail fades (::after); sizes and gradients in the two rules below. */
+:root[data-material="aqua-glass"] body::before,
+:root[data-material="aqua-glass"] body::after {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  left: 2.5vw;
+  top: 14vh;
+  pointer-events: none;
+  transform-origin: 0 50%;
+}
+:root[data-material="aqua-glass"] body::before {
+  /* the caustic: a dominant white core, steep towards the light, a short tail away from it */
+  width: 170px;
+  height: 44px;
+  transform: rotate(34deg);
+  background:
+    radial-gradient(ellipse 7% 15% at 16% 50%, rgb(255 255 255 / .97), rgb(255 255 255 / 0) 100%),
+    radial-gradient(ellipse 16% 30% at 18% 50%, rgb(255 255 255 / .45), rgb(255 255 255 / 0) 100%),
+    linear-gradient(90deg, rgb(255 255 255 / 0) 8%, rgb(255 255 255 / .55) 15%, rgb(255 255 255 / .22) 34%, rgb(255 255 255 / 0) 62%) 0 50% / 100% 6px no-repeat;
+  opacity: min(.95, calc(var(--aqua-strength) * var(--aqua-glare) * var(--aqua-l-beam) * 2.6));
+}
+:root[data-material="aqua-glass"] body::after {
+  /* dispersion only where the tail fades: a short, muted fringe, red on one side, blue on the
+     other, white between, gone within a few dozen pixels */
+  width: 170px;
+  height: 44px;
+  transform: rotate(34deg);
+  background: linear-gradient(180deg, transparent 34%, hsl(8 70% 72% / .9) 41%, hsl(48 80% 80% / .6) 45%,
+    rgb(255 255 255 / .2) 50%, hsl(190 60% 76% / .6) 55%, hsl(232 62% 78% / .9) 59%, transparent 66%);
+  -webkit-mask-image: linear-gradient(90deg, transparent 22%, #000 32%, rgb(0 0 0 / .5) 44%, transparent 58%);
+  mask-image: linear-gradient(90deg, transparent 22%, #000 32%, rgb(0 0 0 / .5) 44%, transparent 58%);
+  opacity: min(.45, calc(var(--aqua-strength) * var(--aqua-glare) * var(--aqua-l-beam) * .9));
+}
+
+/* The header: the same glass, denser so the controls stay crisp. */
+:root[data-material="aqua-glass"] header.topbar {
+  background: color-mix(in srgb, var(--card-bg) calc(100% - var(--aqua-strength) * 32%), transparent);
+  border-bottom-color: transparent;
+  box-shadow: 0 10px 24px -20px rgb(30 40 58 / calc(.10 + var(--aqua-s-shadow) * .30));
+  -webkit-backdrop-filter: blur(calc(var(--aqua-strength) * 18px)) saturate(1.1);
+  backdrop-filter: blur(calc(var(--aqua-strength) * 18px)) saturate(1.1);
+}
+
+/* One glass material for every surface. No border, no bevel, no backdrop filter: a surface
+   must not become its own stacking context, so a rear light can lie behind it. */
+:root[data-material="aqua-glass"] :is(
+  .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+  position: relative;
+  border-color: transparent;
+  border-radius: var(--aqua-radius);
+  background: var(--aqua-k-caustic), var(--aqua-k-trans), var(--aqua-glass);
+  /* Position the light fields on the border box: a field must never tile into the (clear)
+     border row on the opposite side, which reads as a stroke. */
+  background-origin: border-box;
+  background-repeat: no-repeat;
+  box-shadow: var(--aqua-suspension);
+}
+/* The same material under rear light: the lens also carries the rear light. */
+
+/* The search field: the same glass, denser for reading. */
+:root[data-material="aqua-glass"] .arrival-search input {
+  border-color: transparent;
+  background: var(--aqua-k-trans),
+    color-mix(in srgb, var(--card-bg) calc(100% - var(--aqua-strength) * 18%), transparent);
+  background-origin: border-box;
+  background-repeat: no-repeat;
+  box-shadow: var(--aqua-suspension);
+}
+/* Typography is never attenuated: description text stays graphite on glass. */
+:root[data-material="aqua-glass"] .shell[data-state="arrival"] nav.leftnav .blurb {
+  color: color-mix(in srgb, var(--fg) 80%, #4a5262);
+}
+
+/* rear: the light behind an active surface, painted into the page's own stacking context so
+   it lies behind the glass and is seen through it. Exactly the surface's own shape (inset 0,
+   the surface's radius): nothing outside the glass, no box, no outline, no blur. */
+:root[data-material="aqua-glass"] .shell[data-state="arrival"] nav.leftnav a[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--aqua-k-rear);
+  background-repeat: no-repeat;
+}
+:root[data-material="aqua-glass"][data-aqua-optics] .shell[data-state="arrival"] nav.leftnav a[aria-current="page"]::before {
+  background: var(--aqua-rear-field) 0 0 / 100% 100% no-repeat;
+  opacity: var(--aqua-l-rear);
+}
+/* Small active controls (the current tab, menu entry, primary button) keep the theme's own
+   fill and receive the same rear light beneath them. */
+:root[data-material="aqua-glass"] :is(
+  nav.surface-switch a[aria-current="page"],
+  nav.leftnav li a[aria-current="page"],
+  form.filters button) {
+  box-shadow: 0 6px 16px -6px color-mix(in srgb, var(--aqua-rear)
+    calc(min(1, var(--aqua-s-rear) * 2.4) * 100%), transparent);
+}
+
+/* The generated optics (aqua-optics.js): the normal-field response as a 9-slice texture,
+   corners exact, edges stretched, so it fits every surface. It replaces the CSS edge-lens
+   approximation; the card-scale fields (transmission, corner weighting) stay CSS. */
+:root[data-material="aqua-glass"][data-aqua-optics] :is(
+  .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+  --aqua-k-caustic: var(--aqua-k-corner);
+  border-style: solid;
+  border-image-source: var(--aqua-optic);
+  border-image-slice: var(--aqua-optic-slice);
+  border-image-width: var(--aqua-optic-width);
+  border-image-repeat: stretch;
+}
+:root[data-material="aqua-glass"][data-aqua-optics] .shell[data-state="arrival"] nav.leftnav a[aria-current="page"] {
+  border-image-source: var(--aqua-optic-lit);
+}
+/* The generated prismatic light replaces the CSS approximation: a localized caustic. */
+:root[data-material="aqua-glass"][data-aqua-optics] body::before {
+  left: calc(1vw + 20px);
+  top: calc(8vh + 30px);
+  width: 220px;
+  height: 130px;
+  transform: none;
+  background: var(--aqua-beam) 0 0 / 220px 130px no-repeat;
+  -webkit-mask-image: none;
+  mask-image: none;
+  filter: none;
+  opacity: var(--aqua-l-beam);
+}
+:root[data-material="aqua-glass"][data-aqua-optics] body::after { display: none; }
+
+:root[data-material="aqua-glass"] :is(.card, .kpi, nav.leftnav a):focus-visible {
+  outline: 2px solid #175ca8;
+  outline-offset: 4px;
+}
+
+/* Ablation: the neutral glass off (?aqua-off=glass) shows plain surfaces, so the illumination
+   terms can be judged alone. Additive: with the glass on, nothing here applies. */
+:root[data-material="aqua-glass"][data-aqua-glass="off"] :is(
+  .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+  background: var(--card-bg);
+  border-image: none;
+  box-shadow: none;
+}
+
+/* Less transparency or more contrast asked for: solid surfaces, no light effects. */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-material="aqua-glass"] body::before,
+  :root[data-material="aqua-glass"] body::after,
+  :root[data-material="aqua-glass"] .shell[data-state="arrival"] nav.leftnav a[aria-current="page"]::before {
+    display: none;
+  }
+  :root[data-material="aqua-glass"] :is(
+    .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+    .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+    background: var(--card-bg);
+    border-color: var(--border);
+  }
+}
+@media (forced-colors: active) {
+  :root[data-material="aqua-glass"] body::before,
+  :root[data-material="aqua-glass"] body::after,
+  :root[data-material="aqua-glass"] .shell[data-state="arrival"] nav.leftnav a[aria-current="page"]::before {
+    display: none;
+  }
+  :root[data-material="aqua-glass"] :is(.card, .kpi, nav.leftnav a) {
+    border: 1px solid ButtonText;
+    background: Canvas;
+    color: CanvasText;
+    box-shadow: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * The Material Studio (on /view/material-lab when Aqua Glass is chosen).
+ * --------------------------------------------------------------------------- */
+.aqua-studio { position: relative; border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin: 12px 0; background: var(--card-bg); max-width: 760px }
+.aqua-studio .as-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px }
+.aqua-studio .as-head h2 { margin: 0; font-size: 14px }
+.aqua-studio label { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; margin: 10px 0; font-size: 13px }
+.aqua-studio label input[type=range] { grid-column: 1 / -1; width: 100% }
+.aqua-studio output { color: var(--muted, inherit); font-variant-numeric: tabular-nums }
+/* Sliders: neutral steel, never the brand colour; the light colour slider is the spectrum. */
+.aqua-studio input[type=range] { accent-color: #5b6b7d }
+.aqua-studio .as-hue input[type=range] { -webkit-appearance: none; appearance: none; height: 8px; border-radius: 4px; margin: 6px 0;
+  background: linear-gradient(90deg, hsl(0 85% 50%), hsl(60 85% 50%), hsl(120 85% 45%), hsl(180 85% 45%), hsl(240 85% 55%), hsl(300 85% 50%), hsl(360 85% 50%)) }
+.aqua-studio .as-hue input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 1px solid #9aa6b3; box-shadow: 0 1px 3px rgb(0 0 0 / .25) }
+.aqua-studio .as-hue input[type=range]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: #fff; border: 1px solid #9aa6b3 }
+.aqua-studio .as-hue .as-dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -2px; margin-left: 6px;
+  background: hsl(var(--aqua-hue) calc(var(--aqua-sat) * 85%) calc(48% + (1 - var(--aqua-sat)) * 50%)); border: 1px solid #c5ccd4 }
+.aqua-studio .as-ends { display: flex; justify-content: space-between; font-size: 12px; opacity: .75; margin-top: -4px }
+.aqua-studio details > summary { position: absolute; top: 12px; right: 16px; cursor: pointer; display: inline-block; border: 1px solid var(--border); border-radius: 999px; padding: 3px 12px; font-size: 13px; list-style: none }
+.aqua-studio details > summary::-webkit-details-marker { display: none }
+.aqua-studio fieldset { border: 0; padding: 0; margin: 12px 0 0 }
+.aqua-studio legend { font-size: 13px; margin-bottom: 6px }
+.aqua-studio .as-swatches { display: flex; flex-wrap: wrap; gap: 14px }
+.aqua-studio .as-swatches label { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: 0; font-size: 12px; cursor: pointer }
+.aqua-studio .as-swatches input { position: absolute; opacity: 0; width: 1px; height: 1px }
+.aqua-studio .as-swatches .dot { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border) }
+.aqua-studio .as-swatches input:checked + .dot { box-shadow: 0 0 0 2px var(--card-bg), 0 0 0 4px var(--fg) }
+.aqua-studio .as-swatches input:focus-visible + .dot { outline: 2px solid #175ca8; outline-offset: 3px }
+.aqua-studio .as-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px }
+
+/* ---------------------------------------------------------------------------
+ * The appearance sidecar of the preferences menu (every material: it is how a user reaches
+ * Aqua Glass). The page behind it is the preview.
+ * --------------------------------------------------------------------------- */
+.ap-entry { position: relative }
+.ap-entry hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0 }
+.ap-eye { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; color: var(--fg); text-decoration: none; font-size: 13px }
+.ap-eye span:first-of-type { flex: 1 }
+.ap-eye .ico { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round }
+.ap-eye:hover, .ap-eye[aria-expanded="true"] { background: var(--soft, rgb(0 0 0 / .05)) }
+.ap-eye.ap-pinned { box-shadow: inset 0 0 0 1px var(--border) }
+.aqua-studio.ap-sidecar { position: fixed; z-index: 60; width: 320px; max-height: calc(100vh - 16px); overflow: auto; max-width: calc(100vw - 32px); margin: 0;
+  box-shadow: 0 18px 40px -18px rgb(20 30 45 / .35), 0 2px 6px rgb(20 30 45 / .08); text-align: left }
+.aqua-studio.ap-sidecar[hidden] { display: none }
+.ap-sidecar .ap-close { border: 0; background: none; font-size: 18px; line-height: 1; cursor: pointer; color: var(--muted, inherit); padding: 2px 6px }
+.ap-sidecar details.ap-expert > summary { position: static; margin-top: 10px }
+.ap-sidecar .ap-foot { position: relative }
+.ap-sidecar .ap-reset { position: absolute; right: 0; top: 8px; border: 0; background: none; font-size: 18px; cursor: pointer; color: var(--muted, inherit) }
+.ap-sidecar .as-swatches { gap: 10px }
+@media (max-width: 700px), (hover: none) {
+  .aqua-studio.ap-sidecar { position: fixed; left: 0 !important; right: 0; bottom: 0; top: auto; width: auto; max-width: none;
+    max-height: 72vh; overflow: auto; top: auto !important; border-radius: 16px 16px 0 0; padding-bottom: 28px }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .aqua-studio.ap-sidecar { animation: ap-in .14s ease-out }
+  @keyframes ap-in { from { opacity: 0; transform: translateY(4px) } }
+}

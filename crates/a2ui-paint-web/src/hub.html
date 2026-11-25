@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="de">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Service Hub fixture · Material Laboratory · a2ui</title>
+<style>
+/* The Service Hub start page of report-rs (#208/#209), rebuilt as a synthetic fixture: the
+   same layout and copy, no production code, no brand assets. Every tile is the one optical
+   surface specification (a2ui_paint::optics::surface) composed natively: an SVG backdrop
+   filter over CPU maps. Text is ordinary DOM above the glass and is never filtered. */
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{font:15px/1.45 Inter,ui-sans-serif,system-ui,sans-serif;color:#18212b;background:#e9edf2}
+.scene{position:relative;min-height:100vh;isolation:isolate;background:linear-gradient(180deg,#eef1f5,#e6eaf0)}
+.top{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:18px;height:56px;padding:0 20px;background:rgba(255,255,255,.92);border-bottom:1px solid #dfe3ea;font-size:14px}
+.brand{font-weight:700;letter-spacing:.04em;font-size:15px;display:flex;align-items:center;gap:10px}
+.brand i{display:inline-block;width:14px;height:14px;border-radius:3px;background:#c8102e}
+.crumbs{color:#5b6573;border-left:1px solid #dfe3ea;padding-left:16px}
+.crumbs b{color:#18212b}
+.pill{border:1px solid #d5dae2;border-radius:8px;padding:6px 12px;background:#fff}
+.seg{display:flex;border:1px solid #d5dae2;border-radius:8px;overflow:hidden;background:#fff}
+.seg span{padding:6px 10px}.seg .on{background:#c8102e;color:#fff;border-radius:6px}
+main{max-width:1010px;margin:0 auto;padding:30px 0 60px;text-align:center}
+h1{font-size:28px;margin:16px 0 14px}
+.intro{color:#5b6573;max-width:500px;margin:0 auto 22px;font-size:15px}
+.search{display:block;width:520px;max-width:90%;margin:0 auto 30px;padding:12px 20px;border-radius:24px;border:0;background:#fff;font:inherit;color:#5b6573;text-align:left}
+.grid{display:grid;grid-template-columns:repeat(3,327px);gap:14px;justify-content:center;text-align:left}
+.tile{position:relative;height:129px;padding:20px 20px 14px;border-radius:14px;color:#18212b;text-decoration:none;isolation:isolate}
+.tile .glass{position:absolute;inset:0;border-radius:14px;z-index:-1;
+  -webkit-backdrop-filter:url(#hub);backdrop-filter:url(#hub)}
+.tile .glass .layer{position:absolute;inset:0;border-radius:inherit;background-size:100% 100%}
+.tile .ico{width:40px;height:40px;border-radius:9px;background:rgba(200,16,46,.08);display:grid;place-items:center;margin-bottom:8px}
+.tile .ico svg{width:20px;height:20px;stroke:#c8102e;fill:none;stroke-width:1.6}
+.tile b{display:block;font-size:16px;margin-bottom:6px}
+.tile small{font-size:13px;color:#2c3541}
+.tile .chev{position:absolute;right:20px;bottom:24px;color:#2c3541}
+.rear{position:absolute;pointer-events:none;background-size:100% 100%;background-repeat:no-repeat;z-index:-2}
+#panel{position:fixed;right:12px;bottom:12px;width:300px;z-index:10;padding:10px 12px;background:rgba(255,255,255,.96);border:1px solid #d9dee7;border-radius:10px;font:12px/1.35 ui-sans-serif,system-ui,sans-serif;text-align:left}
+#panel label{display:block;margin:4px 0}#panel label span{display:flex;justify-content:space-between}
+#panel input[type=range],#panel select{width:100%}
+#panel .row{display:flex;flex-wrap:wrap;gap:4px}
+#readout{font:11px ui-monospace,monospace;white-space:pre-wrap;color:#334}
+@media (prefers-reduced-transparency:reduce),(forced-colors:active){.tile .glass{-webkit-backdrop-filter:none;backdrop-filter:none;background:Canvas}.rear{display:none}}
+</style>
+<body>
+<div class="scene" id="scene">
+<header class="top"><span class="brand"><i></i>SERVICE HUB</span><span class="crumbs">Service Hub / <b>Start</b></span><span class="pill">Tools</span><span style="color:#5b6573">Fokus</span><span class="seg"><span>Cockpit</span><span class="on">Hub</span><span>Matrix</span></span></header>
+<main>
+<h1>Was möchten Sie heute tun?</h1>
+<p class="intro">Ein Arbeitsbereich, der erst atmet und dann Kontext zeigt. Jeder Bereich zeigt dieselben freigegebenen Daten, nur aus einem anderen Blickwinkel.</p>
+<div class="search">Kunde suchen …</div>
+<div class="grid" id="grid"></div>
+</main>
+</div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<filter id="hub" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+<feImage id="map" x="0" y="0" preserveAspectRatio="none" result="map"/>
+<feDisplacementMap id="dg" in="SourceGraphic" in2="map" xChannelSelector="R" yChannelSelector="G" result="direct"/>
+<feGaussianBlur id="fineB" in="direct" stdDeviation="0" result="fine"/>
+<feGaussianBlur id="wideB" in="direct" stdDeviation="0" result="wide"/>
+<feComposite id="mixDF" in="direct" in2="fine" operator="arithmetic" k1="0" k2="1" k3="0" k4="0" result="df"/>
+<feComposite id="mixW" in="df" in2="wide" operator="arithmetic" k1="0" k2="1" k3="0" k4="0"/>
+</filter></defs></svg>
+<form id="panel" onsubmit="return false">
+<b>Service Hub fixture</b> · native SVG/DOM, one surface spec
+<label><span>Material</span><select id="preset"><option value="aqua">Aqua (candidate)</option><option value="clear-card">Clear glass card</option><option value="frosted-card">Frosted glass card</option></select></label>
+<label><span>Effect strength <output id="strengthO"></output></span><input id="strength" type="range" min="0" max="1" step="0.01" value="0.53"></label>
+<label><span>Key-light azimuth <output id="lightO"></output></span><input id="light" type="range" min="-180" max="180" value="-110"></label>
+<div class="row" id="ambients"><button type="button" data-hue="352" data-sat="0.75">Ruby</button><button type="button" data-hue="212" data-sat="0.80">Ocean</button><button type="button" data-hue="158" data-sat="0.55">Mint</button><button type="button" data-hue="0" data-sat="0">Neutral</button></div>
+<label><span>Rear light (active card) <output id="haloO"></output></span><input id="halo" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+<p id="readout"></p>
+</form>
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var TILES = [
+    ['Dashboard', 'Überblick über Kunden und Reporting im Zugriff', '<rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/>'],
+    ['Kunden', 'Kundenakten und ihr Reporting-Status', '<circle cx="9" cy="8" r="3"/><path d="M3 20c0-4 3-6 6-6s6 2 6 6"/><path d="M16 5a3 3 0 0 1 0 6M18 14c2 1 3 3 3 6"/>'],
+    ['Services', 'Welche Kunden welchen Service gebucht haben', '<path d="M12 3l9 9-9 9-9-9z"/><path d="M12 8l4 4-4 4-4-4z"/>'],
+    ['Produktkatalog', 'Produkte und Technik (noch keine Quelle angebunden)', '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/>'],
+    ['Verträge', 'Vertragspflichten und geschuldete Reports', '<path d="M6 3h8l4 4v14H6z"/><path d="M9 11h6M9 15h6"/>'],
+    ['Auswertungen', 'Reporttypen über alle Kunden im Zugriff', '<path d="M4 20h16M7 16v-4M11 16V8M15 16v-6M19 16v-9"/>'],
+    ['Roadmap', 'Was fertig ist, woran gearbeitet wird, und Ihre Rückmeldungen', '<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>'],
+    ['Feedback', 'Wünsche und Rückmeldungen zur Roadmap', '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>'],
+    ['Administration', 'Quellen, Bindung und Nachweise', '<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>']
+  ];
+  var grid = $('#grid');
+  TILES.forEach(function (t, i) {
+    var a = document.createElement('a');
+    a.className = 'tile'; a.href = '#';
+    if (i === 0) a.dataset.active = 'true';
+    a.innerHTML = '<span class="glass"><span class="layer rimL"></span><span class="layer specL"></span></span>' +
+      '<span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true">' + t[2] + '</svg></span><b>' + t[0] + '</b><small>' + t[1] + '</small><span class="chev">›</span>';
+    grid.appendChild(a);
+  });
+  var rear = document.createElement('div'); rear.className = 'rear'; $('#scene').appendChild(rear);
+
+  var TW = 327, TH = 129, CORNER = 14, stats = {};
+  function show() { $('#readout').textContent = Object.keys(stats).map(function (k) { return k + ': ' + stats[k]; }).join('\n'); }
+  function query() {
+    return 'preset=' + $('#preset').value + '&w=' + TW + '&h=' + TH + '&cornerpx=' + CORNER + '&strength=' + $('#strength').value + '&light=' + $('#light').value;
+  }
+  var slot = {}, dpr = window.devicePixelRatio || 1;
+  function load(kind, apply) {
+    var u = '/lab/optics/surface/map?kind=' + kind + '&dpr=' + dpr + '&' + query();
+    var s = slot[kind] || (slot[kind] = {});
+    s.want = u; if (s.have === u) return;
+    fetch(u).then(function (res) {
+      if (!res.ok) throw new Error(kind + ': HTTP ' + res.status);
+      return res.blob().then(function (b) {
+        if (s.want !== u) return;
+        if (s.obj) URL.revokeObjectURL(s.obj);
+        s.obj = URL.createObjectURL(b); s.have = u; apply(s.obj, res.headers);
+      });
+    }).catch(function (e) { stats.error = String(e); show(); });
+  }
+  function update() {
+    ['strength', 'light', 'halo'].forEach(function (k) { $('#' + k + 'O').textContent = $('#' + k).value; });
+    // one map set serves every tile: the footprints are identical
+    load('disp', function (obj, h) {
+      var box = h.get('x-a2ui-box').split('x').map(Number);
+      var m = $('#map'); m.setAttribute('href', obj); m.setAttribute('width', box[0] / dpr); m.setAttribute('height', box[1] / dpr);
+      $('#dg').setAttribute('scale', +h.get('x-a2ui-scale-g') / dpr);
+      var wts = h.get('x-a2ui-weights').split(' ').map(Number), sig = h.get('x-a2ui-sigma').split(' ').map(Number);
+      $('#fineB').setAttribute('stdDeviation', sig[0] / dpr); $('#wideB').setAttribute('stdDeviation', sig[1] / dpr);
+      $('#mixDF').setAttribute('k2', wts[0]); $('#mixDF').setAttribute('k3', wts[1]); $('#mixW').setAttribute('k3', wts[2]);
+      var t = h.get('x-a2ui-tint').split(' ').map(Number);
+      document.querySelectorAll('.tile .glass').forEach(function (g) {
+        g.style.width = box[0] / dpr + 'px'; g.style.height = box[1] / dpr + 'px'; g.style.inset = '-1px auto auto -1px';
+        g.style.background = 'rgba(' + t[0] + ',' + t[1] + ',' + t[2] + ',' + t[3] + ')';
+      });
+      stats['maps (all tiles share them)'] = box.join('×') + ' px at DPR ' + dpr + ', ' + h.get('x-a2ui-render-us') + ' µs';
+      stats['SVG encoding error p50/p95/p99/max px'] = h.get('x-a2ui-svg-error');
+      show();
+    });
+    load('spec', function (obj) { document.querySelectorAll('.specL').forEach(function (l) { l.style.backgroundImage = 'url(' + obj + ')'; }); });
+    load('rim', function (obj) { document.querySelectorAll('.rimL').forEach(function (l) { l.style.backgroundImage = 'url(' + obj + ')'; }); });
+    rearUpdate();
+  }
+  // the rear light behind the active (Dashboard) tile; fades to zero inside its own box
+  var rearHave = '';
+  function rearUpdate() {
+    var tile = $('.tile[data-active="true"]'), r = tile.getBoundingClientRect(), sc = $('#scene').getBoundingClientRect();
+    var m = Math.round(0.6 * Math.min(TW, TH)) + 40, bw = TW + 2 * m, bh = TH + 2 * m;
+    rear.style.left = (r.left - sc.left - m) + 'px'; rear.style.top = (r.top - sc.top - m) + 'px';
+    rear.style.width = bw + 'px'; rear.style.height = bh + 'px';
+    var u = '/lab/optics/rear?w=' + Math.ceil(bw / 2) + '&h=' + Math.ceil(bh / 2) + '&hue=' + (rear.dataset.hue || 352) + '&sat=' + (rear.dataset.sat || 0.75) + '&halo=' + $('#halo').value + '&strength=' + $('#strength').value;
+    if (u === rearHave) return;
+    rearHave = u;
+    fetch(u).then(function (res) { return res.blob(); }).then(function (b) {
+      if (rearHave !== u) return;
+      rear.style.backgroundImage = 'url(' + URL.createObjectURL(b) + ')';
+    });
+  }
+  var timer = 0;
+  document.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(update, 40); });
+  $('#preset').addEventListener('change', update);
+  document.querySelectorAll('#ambients button').forEach(function (b) {
+    b.addEventListener('click', function () { rear.dataset.hue = b.dataset.hue; rear.dataset.sat = b.dataset.sat; update(); });
+  });
+  addEventListener('resize', function () { rearUpdate(); });
+  var q = new URLSearchParams(location.search);
+  if (q.get('preset')) $('#preset').value = q.get('preset');
+  update();
+  window.__hub = { stats: stats, update: update };
+})();
+</script>
+</html>

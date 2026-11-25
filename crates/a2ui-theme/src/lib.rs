@@ -19,7 +19,10 @@
 pub const THEMES_CSS: &str = include_str!("../assets/themes.css");
 
 pub mod material;
-pub use material::{AMBIENTS, Ambient, Atmosphere, MATERIALS, MaterialInfo, Rendering, material};
+pub use material::{
+    AMBIENTS, Ambient, Atmosphere, DEFAULT_MATERIAL, MATERIALS, MaterialInfo, Rendering,
+    SLIDER_MATERIALS, material,
+};
 
 /// The Holo Glass material, linked only while the `holo-glass` theme is in force. It
 /// refers to its pictures relative to itself (`../assets/…`), so serve it under
@@ -195,6 +198,10 @@ macro_rules! assets {
 assets! {
     "themes.css" => "text/css; charset=utf-8",
     "holo-glass/css/holo-glass.css" => "text/css; charset=utf-8",
+    "holo-v3/holo-v3.css" => "text/css; charset=utf-8",
+    "aqua-glass/aqua-glass.css" => "text/css; charset=utf-8",
+    "aqua-glass/aqua-sidecar.js" => "text/javascript; charset=utf-8",
+    "aqua-glass/aqua-studio.js" => "text/javascript; charset=utf-8",
     "holo-glass/assets/effects/ambient-glow.png" => "image/png",
     "holo-glass/assets/effects/ambient-ribbons.png" => "image/png",
     "holo-glass/assets/rail/rail_shell__active@1x.png" => "image/png",

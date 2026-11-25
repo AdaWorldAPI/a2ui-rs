@@ -10,8 +10,11 @@
 //! | atmosphere | the viewer's own light: colour and intensity | [`Atmosphere`] (this module) |
 //!
 //! A material never names a colour and a theme never names an optical effect, so any theme
-//! can be combined with any material and any atmosphere. The optics of the glass material are
-//! computed by `a2ui_paint::optics`; this module only names and validates the choices.
+//! can be combined with any material and any atmosphere. Every material's stylesheet and script
+//! are assets of this crate, so every app links the same files; this module names and
+//! validates the choices. The materials are distinct designs: they share no rendering
+//! mechanism and none is derived from another. The optical engine (`a2ui_paint::optics`, GPU
+//! research) is independent of them.
 //!
 //! Zero dependencies, like the rest of the crate.
 
@@ -20,49 +23,100 @@
 pub enum Rendering {
     /// No material: flat surfaces, nothing linked.
     None,
-    /// A stylesheet among this crate's assets ([`crate::asset`]).
+    /// Rules inside the always-present [`crate::THEMES_CSS`]; nothing extra to link.
+    Shared,
+    /// A stylesheet among this crate's assets ([`crate::asset`]), linked when in force.
     Stylesheet(&'static str),
-    /// Computed by the optical engine (`a2ui_paint::optics`); its browser assets follow in
-    /// plan step C.
+    /// Computed by the optical engine (`a2ui_paint::optics`, the GPU research path). No
+    /// shipped material uses it: Aqua Glass in production is native DOM ([`Stylesheet`]).
+    ///
+    /// [`Stylesheet`]: Rendering::Stylesheet
     Optical,
 }
 
 /// One material: the key used in `data-material` and in saved settings, its menu label,
-/// how it is drawn, and whether the viewer's [`Atmosphere`] applies to it.
+/// how it is drawn, the script it needs (asset path), and whether the viewer's
+/// [`Atmosphere`] applies to it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MaterialInfo {
     pub key: &'static str,
     pub label: &'static str,
     pub rendering: Rendering,
+    pub script: Option<&'static str>,
     pub uses_atmosphere: bool,
 }
 
 /// The key of the "no material" entry.
 pub const NONE_KEY: &str = "none";
 
-/// Every material the shared tier provides, in menu order.
+/// The material in force when the viewer has no preference: Holo Glass V2.
+pub const DEFAULT_MATERIAL: &str = "holo-v2";
+
+/// The appearance sidecar's material slider, left to right: the default first, then the five
+/// further materials. Each keeps its own stylesheet and look; the slider only chooses.
+pub const SLIDER_MATERIALS: [&str; 6] = [
+    DEFAULT_MATERIAL,
+    "holo-glass",
+    "elevation",
+    "frosted",
+    "holo-v3",
+    "aqua-glass",
+];
+
+/// Every material the shared tier provides, in menu order. Each is its own design with its
+/// own rules; none is a parameter set of another.
 ///
 /// Holo Glass is listed both as a theme and as a material: the theme carries the palette,
-/// the material carries the stylesheet, so the glass can be chosen under any theme.
-/// Materials that still live only in one application (report-rs' elevation, frosted and
-/// Holo V2/V3 styles) join this list when their assets move here.
-pub const MATERIALS: [MaterialInfo; 3] = [
+/// the material carries the stylesheet, so the glass can be chosen under any theme. Holo V2
+/// shares the Holo Glass stylesheet but has its own rules (`data-material="holo-v2"`).
+pub const MATERIALS: [MaterialInfo; 7] = [
     MaterialInfo {
         key: NONE_KEY,
         label: "No material",
         rendering: Rendering::None,
+        script: None,
         uses_atmosphere: false,
     },
     MaterialInfo {
         key: "holo-glass",
         label: "Holo Glass",
         rendering: Rendering::Stylesheet("holo-glass/css/holo-glass.css"),
+        script: None,
+        uses_atmosphere: false,
+    },
+    MaterialInfo {
+        key: "elevation",
+        label: "Elevation",
+        rendering: Rendering::Shared,
+        script: None,
+        uses_atmosphere: false,
+    },
+    MaterialInfo {
+        key: "frosted",
+        label: "Frosted Glass",
+        rendering: Rendering::Shared,
+        script: None,
+        uses_atmosphere: false,
+    },
+    MaterialInfo {
+        key: DEFAULT_MATERIAL,
+        label: "Holo Glass V2",
+        rendering: Rendering::Stylesheet("holo-glass/css/holo-glass.css"),
+        script: None,
+        uses_atmosphere: false,
+    },
+    MaterialInfo {
+        key: "holo-v3",
+        label: "Holo Glass V3",
+        rendering: Rendering::Stylesheet("holo-v3/holo-v3.css"),
+        script: None,
         uses_atmosphere: false,
     },
     MaterialInfo {
         key: "aqua-glass",
         label: "Aqua Glass",
-        rendering: Rendering::Optical,
+        rendering: Rendering::Stylesheet("aqua-glass/aqua-glass.css"),
+        script: Some("aqua-glass/aqua-sidecar.js"),
         uses_atmosphere: true,
     },
 ];
@@ -295,7 +349,8 @@ mod tests {
             material(NONE_KEY).map(|m| m.rendering),
             Some(Rendering::None)
         );
-        assert_eq!(material("holo-v2"), None, "not in the shared registry yet");
+        assert_eq!(material("holo-v2").map(|m| m.key), Some(DEFAULT_MATERIAL));
+        assert_eq!(material("holo-v4"), None);
         assert_eq!(material(""), None);
         let mut keys: Vec<_> = MATERIALS.iter().map(|m| m.key).collect();
         keys.sort_unstable();
@@ -315,6 +370,44 @@ mod tests {
             }
         }
         assert!(sheets > 0, "the check must cover at least one stylesheet");
+    }
+
+    /// Each material carries its own rules: its key appears as `data-material="<key>"` in the
+    /// sheet it links (or in the shared theme sheet), so a material that silently lost its
+    /// rules, or was folded into another, fails here.
+    #[test]
+    fn every_material_has_its_own_rules_and_assets() {
+        let text = |p: &str| std::str::from_utf8(crate::asset(p).unwrap().bytes).unwrap();
+        for m in MATERIALS {
+            let selector = format!("data-material=\"{}\"", m.key);
+            match m.rendering {
+                Rendering::None => assert_eq!(m.key, NONE_KEY),
+                Rendering::Shared => {
+                    assert!(crate::THEMES_CSS.contains(&selector), "{}", m.key)
+                }
+                Rendering::Stylesheet(p) => assert!(text(p).contains(&selector), "{}", m.key),
+                Rendering::Optical => panic!("{} ships no GPU material", m.key),
+            }
+            if let Some(js) = m.script {
+                let a = crate::asset(js).unwrap_or_else(|| panic!("{} needs {js}", m.key));
+                assert!(a.media_type.starts_with("text/javascript"));
+            }
+        }
+    }
+
+    #[test]
+    fn the_slider_starts_at_the_default_and_offers_every_material_once() {
+        assert_eq!(SLIDER_MATERIALS[0], DEFAULT_MATERIAL);
+        assert_eq!(DEFAULT_MATERIAL, "holo-v2");
+        let mut keys = SLIDER_MATERIALS.to_vec();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), SLIDER_MATERIALS.len(), "unique");
+        for k in SLIDER_MATERIALS {
+            assert!(material(k).is_some(), "{k} is registered");
+            assert_ne!(k, NONE_KEY);
+        }
+        assert_eq!(SLIDER_MATERIALS.len(), MATERIALS.len() - 1, "all but none");
     }
 
     /// Orthogonality: the atmosphere names no theme and no material, and a material names no

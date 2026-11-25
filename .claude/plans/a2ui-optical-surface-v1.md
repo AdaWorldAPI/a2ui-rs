@@ -131,3 +131,17 @@ page canvas), plus `drawElement`-style APIs behind a feature check where they ex
 
 Droplet → capsule → clear card → frosted card → aqua: top row WebGL2, bottom row SVG over the
 CPU maps, same parameters. Not yet accepted; Aqua is a candidate, not the approved appearance.
+
+## Material ownership (steps C and D, 2026-11-25)
+
+G1b accepted in full (neutral glass, diffuse rear light, prismatic light). The materials now
+live in `a2ui-theme`: Elevation and Frosted in `themes.css`, Holo Glass and Holo V2 in
+`holo-glass.css`, and Holo V3 (`holo-v3/holo-v3.css`) and Aqua Glass
+(`aqua-glass/{aqua-glass.css, aqua-sidecar.js, aqua-studio.js}`) moved from report-rs byte for
+byte. They are five distinct designs plus the Holo V2 default. Each keeps its own rules and
+none goes through `Surface` or another material's mechanism. `MATERIALS` registers them all,
+`DEFAULT_MATERIAL` is `holo-v2`, and `SLIDER_MATERIALS` orders the appearance sidecar's
+material slider (default first). The accepted Aqua Glass stylesheet is frozen byte for byte
+(`crates/a2ui-theme/tests/aqua_glass_frozen.rs`, references in
+`crates/a2ui-theme/tests/visual/`). The GPU path in this document (`Surface`, `a2ui-optics-gl`)
+stays separate research and does not feed the accepted native DOM material.

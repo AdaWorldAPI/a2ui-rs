@@ -4,10 +4,11 @@
 //! cargo run --release -p a2ui-paint --features optics-png --example optics_timing
 //! ```
 //!
-//! For each component size it reports the median of N runs (µs) for: the cross-section, the
-//! displacement map, the rim map, the rear-light field (at the half-resolution box the lab
-//! requests), PNG encoding of each, and a cache hit (looking up already encoded bytes). A
-//! counting allocator reports allocations, bytes and the peak live heap per stage.
+//! For each component size it reports the median of N runs (µs) for: the surface maps of
+//! the Aqua preset (`Surface::render_maps`: displacement, highlight, rim in one pass), the
+//! rear-light field (at the half-resolution box the lab requests), PNG encoding of each, and a
+//! cache hit (looking up already encoded bytes). A counting allocator reports allocations,
+//! bytes and the peak live heap per stage.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::collections::HashMap;
@@ -15,7 +16,8 @@ use std::hint::black_box;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Instant;
 
-use a2ui_paint::optics::{Glass, RearLight, png_rgba, rear_field};
+use a2ui_paint::optics::surface::Surface;
+use a2ui_paint::optics::{RearLight, png_rgba, rear_field};
 
 struct Counting;
 static ALLOCS: AtomicUsize = AtomicUsize::new(0);
@@ -76,15 +78,12 @@ fn row(stage: &str, (us, n, bytes, peak): (f64, usize, usize, usize)) {
 }
 
 fn main() {
-    let glass = Glass {
-        strength: 0.53,
-        ..Glass::DEFAULT
-    };
     let light = RearLight {
         hue: 352.0,
         sat: 0.75,
         halo: 0.45,
     };
+    let strength = 0.53;
     println!(
         "optics_timing: median of {RUNS} runs, release build expected (debug assertions: {})",
         cfg!(debug_assertions)
@@ -96,35 +95,35 @@ fn main() {
         ("panel", 900, 560),
         ("large panel", 1200, 800),
     ] {
+        let surface = Surface::from_query(&format!(
+            "preset=aqua&w={w}&h={h}&cornerpx=14&strength={strength}"
+        ));
         let m = (0.6 * w.min(h) as f32).round() as u32 + 40;
         let (rw, rh) = ((w + 2 * m).div_ceil(2), (h + 2 * m).div_ceil(2));
-        println!("{name} {w}×{h} (rear field {rw}×{rh}, half resolution)");
-        row("cross-section", measure(|| glass.cross_section()));
-        let cs = glass.cross_section();
-        row(
-            "displacement map",
-            measure(|| glass.render_displacement(w, h, &cs)),
-        );
-        row("rim (Fresnel) map", measure(|| glass.render_specular(w, h)));
+        let (bw, bh) = surface.map_box();
+        println!("{name} {w}×{h} (map box {bw}×{bh}, rear field {rw}×{rh}, half resolution)");
+        row("surface maps", measure(|| surface.render_maps()));
         row(
             "rear-light field",
-            measure(|| rear_field(rw, rh, light, glass.strength)),
+            measure(|| rear_field(rw, rh, light, strength)),
         );
-        let disp = glass.render_displacement(w, h, &cs);
-        let spec = glass.render_specular(w, h);
-        let rear = rear_field(rw, rh, light, glass.strength);
+        let maps = surface.render_maps();
+        let rear = rear_field(rw, rh, light, strength);
         row(
             "png displacement",
-            measure(|| png_rgba(w, h, &disp).unwrap()),
+            measure(|| png_rgba(bw, bh, &maps.displacement).unwrap()),
         );
-        row("png rim", measure(|| png_rgba(w, h, &spec).unwrap()));
+        row(
+            "png highlight",
+            measure(|| png_rgba(bw, bh, &maps.specular).unwrap()),
+        );
         row("png rear", measure(|| png_rgba(rw, rh, &rear).unwrap()));
         // cached: the encoded maps kept by key; a hit is a lookup and a reference count bump
         let mut cache: HashMap<String, std::sync::Arc<Vec<u8>>> = HashMap::new();
-        let key = format!("disp:{w}x{h}:{:?}", glass);
+        let key = surface.to_query();
         cache.insert(
             key.clone(),
-            std::sync::Arc::new(png_rgba(w, h, &disp).unwrap()),
+            std::sync::Arc::new(png_rgba(bw, bh, &maps.displacement).unwrap()),
         );
         row("cache hit (lookup)", measure(|| cache.get(&key).cloned()));
         // a colour change: only the rear field is recomputed and encoded
@@ -135,17 +134,16 @@ fn main() {
         };
         row(
             "colour change",
-            measure(|| png_rgba(rw, rh, &rear_field(rw, rh, ocean, glass.strength)).unwrap()),
+            measure(|| png_rgba(rw, rh, &rear_field(rw, rh, ocean, strength)).unwrap()),
         );
-        // everything from nothing: what an uncached size change costs
         row(
             "uncached, all maps",
             measure(|| {
-                let cs = glass.cross_section();
+                let m = surface.render_maps();
                 (
-                    png_rgba(w, h, &glass.render_displacement(w, h, &cs)).unwrap(),
-                    png_rgba(w, h, &glass.render_specular(w, h)).unwrap(),
-                    png_rgba(rw, rh, &rear_field(rw, rh, light, glass.strength)).unwrap(),
+                    png_rgba(bw, bh, &m.displacement).unwrap(),
+                    png_rgba(bw, bh, &m.specular).unwrap(),
+                    png_rgba(rw, rh, &rear_field(rw, rh, light, strength)).unwrap(),
                 )
             }),
         );
