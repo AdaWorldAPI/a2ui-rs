@@ -7,6 +7,40 @@ North star: **one optical material implementation, consumed by every application
 CSS imitation per application. Applications describe *what an element is* (role, state); the
 shared tier decides how light interacts with it.
 
+## 0. Northstar: OGAR and a2ui-rs as the pattern for every consumer
+
+DECISION (operator, 2026-11-25): *"The Northstar would be to make ogar and a2ui-rs be the
+reusable pattern for all consumers."* It restates the earlier ruling quoted in MedCare-rs
+`Cargo.toml:147` (2026-08-14: *"das sollte global in a2ui-rs sein, reusable for all future apps
+including style and onboarding guide"*). The material is the first appearance concern extracted
+under it; the plan's scope is still only the material.
+
+Where the consumers stand today (from the `Cargo.toml` files of the checkouts in this session,
+2026-11-25):
+
+| consumer | `askama` direct | a2ui-rs crates | `ogar-render-askama` |
+|---|---|---|---|
+| MedCare-rs | yes (0.12) | layout, core, server, wasm, paint | yes |
+| report-rs | yes (0.12) | layout, theme | no |
+| tesseract-rs (`tesseract-paperless-web`, `tesseract-ocr-web`) | yes (0.12) | layout (paperless-web only) | no |
+| sentinel-rs (`sentinel-web`) | yes (0.12) | layout, pinned to a `rev` | no |
+| q2 (`cockpit-server`, `sculpt`) | yes (0.12) | none | no |
+
+MedCare-rs is the closest to the pattern. Every consumer uses the same askama major, so moving a
+template layer onto a2ui-rs is a dependency change, not a version migration.
+
+What the northstar means for this plan:
+
+- Anything generic that the material work produces (material registry, atmosphere type, sidecar,
+  laboratory, optics) lands in a2ui-rs, never in one consumer; a second consumer must be able to
+  adopt it without copying files. Step D's gate G8 (no duplicate renderer left in report-rs)
+  is how that is checked for the first consumer.
+- Moving each consumer's own templates onto a2ui-rs / OGAR is out of scope here. It is one
+  migration per consumer, planned separately.
+- sentinel-rs pins a2ui-layout to a `rev`, which the floating-`main` convention used by the
+  other consumers does not do. Adopting shared material assets there means moving that pin; it
+  is listed so step E sees it, not changed by this plan.
+
 ## 1. Source references
 
 | Ref | What it is | Where |
