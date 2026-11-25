@@ -36,3 +36,67 @@ Recorded: output size only (4.1 MB wasm, 105 KB JS; WASM-INTEGRATION.md:83). Com
 3. **Optics in the shader:** port `rounded_rect` SDF, `Profile::height/slope`, Snell displacement and Schlick F0 (optics.rs:57-69, 143, 178, 421) to WGSL; use the CPU maps (`render_displacement`, optics.rs:205) as the CPU reference for a readback parity test modelled on gpu.rs:548-686. Raindrop/sphere/prism need new SDFs; none exist.
 4. **Build:** generalise `scripts/build-graph-wasm.sh` (hardcodes `-p a2ui-graph`, `a2ui_graph.wasm`, `FieldHandle` symbol check: lines 29, 79, 88) to take crate + export symbol, or add a sibling script.
 5. **Serve:** add the pkg routes beside `/lab/optics` in a2ui-paint-web (whitelist pattern of field-web main.rs:120-128) so the GPU path can be compared with the existing SVG-filter lab on the same parameters. Drive frames on demand (pointer/param change) rather than field-web's unconditional rAF loop (main.rs:205).
+
+## Deviation, 2026-11-25: raw WebGL2, not wgpu
+
+The operator ruled raw WebGL2 from Rust/wasm over wgpu: wgpu's adapter and device
+warm-up shows as a first-frame flicker. The recommendation above (host in a2ui-paint under
+the `wgpu` feature) is therefore not followed. Built instead:
+
+- `crates/a2ui-optics-gl` — `DropUniforms` (every shader constant, computed in Rust from
+  `a2ui_paint::optics::{Droplet, Medium, KeyLight}`), `cpu_sample_points` (CPU reference),
+  `drop.frag` (GLSL ES 3.00, `refract_offset` ported line for line), and a wasm32-only
+  `DropRenderer` over `web-sys` WebGL2. No wgpu, no second optical model.
+- `scripts/build-optics-wasm.sh` — the build-graph-wasm.sh guards for this crate.
+- `/lab/optics/drop-gl` in a2ui-paint-web, plus a three-file whitelist at
+  `/lab/optics/gl/{file}` (`OPTICS_GL_PKG`, else the script's output). The Railway image
+  does not build the pkg yet; there the page reports that the GPU renderer did not start.
+
+The GPU canvas covers only the drop's square; the page is a 2-D canvas shown as itself and
+uploaded once as the texture. A first version shaded the whole viewport per frame.
+
+## Measurements (headless Chromium, SwiftShader software WebGL — CPU, not a GPU)
+
+| | desktop 1280×800 @1× | phone 390×844 @3× |
+|---|---|---|
+| wasm | 117.8 KiB (uncompressed, no wasm-opt) | same |
+| wasm fetch + compile + instantiate | 20–63 ms | 17–26 ms |
+| WebGL2 context + shader compile | 19–136 ms | 129–140 ms |
+| wasm linear memory | 1.13 MiB | 1.13 MiB |
+| page raster (2-D canvas) | 4–6 ms | 1.5 ms |
+| page texture | 3.9 MiB | 11.3 MiB |
+| texture upload call | 2.0–2.5 ms | 0.3–0.4 ms (a lower bound: the copy may be deferred) |
+| load to first frame | 240–400 ms | 475–566 ms |
+| moving frame, whole viewport shaded | mean 23.8 ms | mean 72.6 ms |
+| moving frame, drop square only (184² / 544²) | **mean 1.4–1.9 ms**, p95 1.6–3.9 ms | **mean 9.3–10.0 ms**, p95 11.5–12.3 ms |
+| static | 0 frames: nothing is drawn without a change | same |
+
+Frame times are GPU-synced (a 1-pixel readback after the draw; `gl.finish()` alone timed
+0.1 ms, i.e. it did not wait). The mean over 120 frames is the reliable figure; the browser
+clock is 100 µs without cross-origin isolation. All of this is a software rasterizer; a real
+GPU, and a real phone, are not measured.
+
+## Parity
+
+`DropRenderer::parity()` draws the drop over a 256×256 coordinate texture (nearest
+filtering), reads it back and compares every channel's sampled texel with
+`cpu_sample_points`. Result at dispersion 0 and ×12: 31,072 interior pixels, `mismatch 0`,
+`off_by_one 0`, `leak 0` — exact to the texel. `control_mismatch` (CPU without dispersion)
+is 0 at ×0 and 23,096 at ×12, so the check can see dispersion.
+
+Disable run: the shader changed to use the green index for red. With a one-texel tolerance
+parity still reported `mismatch 0` (the red/green difference is ≤ 1 texel for water), so the
+tolerance alone was vacuous. Counting exact-texel differences separately: the broken shader
+gives `off_by_one 9746`, the real one 0. Both numbers are reported.
+
+## Comparison of the three paths (so far)
+
+| path | per-change cost measured | moving the drop |
+|---|---|---|
+| cached server PNG + SVG filter (`/lab/optics/drop`) | map 0.8 ms + PNG 6.3 ms server-side, cache hit 0.1 µs | no recompute; Chromium-only (SVG backdrop-filter) |
+| client wasm fields | not built | — |
+| GPU shader (`/lab/optics/drop-gl`) | 1.4 ms per frame (software GL, desktop) | one uniform + one draw; any WebGL2 browser |
+
+Open: the client-wasm-fields path; a real-GPU and real-phone measurement; whether the
+page texture should come from the DOM text (here it is a 2-D canvas raster, so the text
+under the drop is not selectable DOM text).

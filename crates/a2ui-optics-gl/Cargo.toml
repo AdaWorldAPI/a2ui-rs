@@ -1,0 +1,41 @@
+[package]
+name = "a2ui-optics-gl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "a2ui-rs optics on the GPU without wgpu: the raindrop rendered by a WebGL2 fragment shader driven from Rust/wasm. The geometry, media and light come from a2ui-paint's optics module; the shader evaluates the same refraction per pixel. Experimental, Material Laboratory only."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The shared optical model: Droplet, Medium (index + Abbe number), KeyLight and
+# the refraction kernel. The shader is fed from these types, and the in-browser
+# parity check compares the GPU against them.
+a2ui-paint = { path = "../a2ui-paint" }
+
+# The browser tier, target-gated like a2ui-graph's: a native build never sees
+# these, a wasm32 build always does. Raw WebGL2 through web-sys, no wgpu: the
+# operator's choice, because wgpu's adapter/device warm-up shows as a first-frame
+# flicker in the page.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
+version = "0.3"
+features = [
+    "HtmlCanvasElement",
+    "WebGl2RenderingContext",
+    "WebGlBuffer",
+    "WebGlFramebuffer",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlTexture",
+    "WebGlUniformLocation",
+    "WebGlVertexArrayObject",
+    "Window",
+    "Performance",
+]
