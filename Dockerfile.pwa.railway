@@ -39,7 +39,7 @@ ARG BIN_NAME
 # git for the OGAR / lance-graph git dependencies. Both repos are PUBLIC — do
 # not add a token to this image.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates pkg-config \
+ && apt-get install -y --no-install-recommends git ca-certificates pkg-config curl \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -49,9 +49,27 @@ RUN rustup show
 
 COPY Cargo.toml ./
 COPY crates ./crates
+COPY scripts/build-optics-wasm.sh ./scripts/
 
 RUN cargo build --release -p ${BIN_NAME} --features pwa \
  && cp target/release/${BIN_NAME} /usr/local/bin/a2ui-paint-web
+
+# The optics GPU renderer behind /lab/optics/gl/* (a2ui-optics-gl, raw WebGL2):
+# built to wasm here and shipped as plain files, served from OPTICS_GL_PKG.
+# Without this step the lab pages load but the GPU path 404s.
+#
+# The wasm-bindgen CLI must match the wasm-bindgen crate exactly. There is no
+# committed lock (see above), so the version is read from the Cargo.lock the
+# build above just resolved, and the matching prebuilt CLI is fetched. A
+# mismatch is the silent failure build-optics-wasm.sh guards against, and it
+# re-checks the version itself. A failure here fails the image.
+RUN rustup target add wasm32-unknown-unknown \
+ && v=$(awk '/^name = "wasm-bindgen"$/{getline; gsub(/[",]/,""); print $3; exit}' Cargo.lock) \
+ && test -n "$v" \
+ && curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/${v}/wasm-bindgen-${v}-x86_64-unknown-linux-musl.tar.gz" \
+    | tar -xz -C /usr/local/bin --strip-components=1 "wasm-bindgen-${v}-x86_64-unknown-linux-musl/wasm-bindgen" \
+ && ./scripts/build-optics-wasm.sh /optics-gl-pkg \
+ && test -s /optics-gl-pkg/a2ui_optics_gl_bg.wasm && test -s /optics-gl-pkg/a2ui_optics_gl.js
 
 # ── runtime ────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
@@ -62,6 +80,8 @@ RUN apt-get update \
  && useradd --system --create-home --uid 10001 a2ui
 
 COPY --from=builder /usr/local/bin/a2ui-paint-web /usr/local/bin/a2ui-paint-web
+COPY --from=builder /optics-gl-pkg /app/optics-gl-pkg
+ENV OPTICS_GL_PKG=/app/optics-gl-pkg
 
 USER a2ui
 WORKDIR /app

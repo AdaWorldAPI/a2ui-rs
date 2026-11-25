@@ -145,3 +145,15 @@ material slider (default first). The accepted Aqua Glass stylesheet is frozen by
 (`crates/a2ui-theme/tests/aqua_glass_frozen.rs`, references in
 `crates/a2ui-theme/tests/visual/`). The GPU path in this document (`Surface`, `a2ui-optics-gl`)
 stays separate research and does not feed the accepted native DOM material.
+
+## The GPU renderer ships in the Railway image (OPT-2, 2026-11-25)
+
+`Dockerfile.pwa.railway` (the `a2ui-pwa` service) now builds `a2ui-optics-gl` to wasm in the
+builder stage and ships the package as files (`/app/optics-gl-pkg`, served through
+`OPTICS_GL_PKG`). The wasm-bindgen CLI is the prebuilt release that matches the crate version in
+the Cargo.lock the image build itself resolves. The image keeps floating its dependencies without
+a committed lock, so a pinned CLI would drift. `build-optics-wasm.sh` checks the versions again,
+and a failed wasm build fails the image. The steps were reproduced locally on a fresh copy with a
+newly resolved lock (wasm-bindgen 0.2.130). The server then served the package from
+`OPTICS_GL_PKG` (200, `application/wasm`, 187,667 B), and `/lab/optics/drop-gl` drew its GPU
+canvas without errors. `Dockerfile.railway` (the non-PWA image) is unchanged.
