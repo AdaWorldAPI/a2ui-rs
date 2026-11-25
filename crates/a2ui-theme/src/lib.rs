@@ -400,6 +400,28 @@ mod tests {
         assert_eq!(token_rule("nope"), None);
     }
 
+    /// FNV-1a 64 of a file's bytes.
+    fn fnv(bytes: &[u8]) -> u64 {
+        bytes.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
+        })
+    }
+
+    /// The theme stylesheets are the exact bytes report-rs shipped before they moved
+    /// here. A change to how a theme looks is the owner's decision, made on purpose by
+    /// updating these two numbers, never as a side effect.
+    #[test]
+    fn the_theme_stylesheets_are_the_approved_bytes() {
+        assert_eq!(
+            (THEMES_CSS.len(), fnv(THEMES_CSS.as_bytes())),
+            (11981, 0x6f912e122759d3c9)
+        );
+        assert_eq!(
+            (HOLO_GLASS_CSS.len(), fnv(HOLO_GLASS_CSS.as_bytes())),
+            (21634, 0x68fdceb72513782f)
+        );
+    }
+
     #[test]
     fn the_brand_values_equal_the_brand_rule() {
         let r = rule(BRAND_KEY);
