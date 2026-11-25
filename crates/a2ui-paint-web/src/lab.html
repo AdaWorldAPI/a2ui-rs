@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Material Laboratory · a2ui</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:14px/1.4 ui-sans-serif,system-ui,sans-serif;color:#16202e;overflow:hidden}
+body[data-bg=checker]{background:repeating-conic-gradient(#7d8ba3 0 25%,#e9edf2 0 50%) 0 0/32px 32px}
+body[data-bg=stripes]{background:repeating-linear-gradient(90deg,#33415a 0 6px,#eef1f5 6px 24px)}
+body[data-bg=split]{background:linear-gradient(90deg,#000 50%,#fff 50%)}
+body[data-bg=gradient]{background:linear-gradient(135deg,#1d2a44,#9fb4d6 45%,#f4f6fa)}
+body[data-bg=rgb]{background:linear-gradient(90deg,#e0102f 0 33%,#10a050 33% 66%,#1050e0 66%)}
+body[data-bg=page]{background:#eef1f6}
+.page-text{display:none;position:absolute;inset:24px 360px 24px 24px;columns:3 260px;color:#253041;font-size:15px}
+body[data-bg=page] .page-text{display:block}
+#rear{position:absolute;pointer-events:none;background-size:100% 100%;background-repeat:no-repeat}
+#glass{position:absolute;left:120px;top:140px;width:420px;height:200px;border-radius:28px;cursor:grab;touch-action:none;
+  background:var(--tint,transparent);-webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px)}
+.lens #glass{-webkit-backdrop-filter:url(#lens);backdrop-filter:url(#lens)}
+#spec{position:absolute;inset:0;pointer-events:none;background-size:100% 100%;border-radius:inherit}
+#glass .label{position:absolute;left:24px;top:18px;font-weight:600;font-size:20px;pointer-events:none}
+#panel{position:fixed;top:0;right:0;bottom:0;width:340px;overflow:auto;padding:14px 16px;background:#fbfcfe;
+  border-left:1px solid #d9dee7;font-size:13px}
+#panel h1{font-size:15px;margin:0 0 4px}
+#panel p{margin:0 0 10px;color:#4a5568}
+#panel label{display:block;margin:8px 0}
+#panel label span{display:flex;justify-content:space-between}
+#panel input[type=range],#panel select{width:100%}
+#panel small{display:block;color:#6b7686}
+#panel fieldset{border:1px solid #d9dee7;border-radius:8px;margin:10px 0;padding:6px 10px}
+#panel .row{display:flex;flex-wrap:wrap;gap:6px}
+#panel button{font:inherit;padding:3px 8px;border:1px solid #c6cdd8;border-radius:6px;background:#fff;cursor:pointer}
+#readout{font:12px ui-monospace,monospace;color:#334;white-space:pre-wrap}
+@media (max-width:720px){#panel{top:auto;width:auto;left:0;height:46%;border-left:0;border-top:1px solid #d9dee7}
+  .page-text{inset:16px 16px 48% 16px}}
+@media (prefers-reduced-transparency:reduce),(prefers-contrast:more),(forced-colors:active){
+  #glass,.lens #glass{-webkit-backdrop-filter:none;backdrop-filter:none;background:Canvas}
+  #spec,#rear{display:none}}
+</style>
+<body data-bg="checker">
+<div class="page-text">Glass is judged against something behind it. This page puts one element over
+backgrounds whose structure is known: a checkerboard shows displacement, lines show distortion,
+the black and white halves show transmission, the coloured bands show any dispersion, and this
+text shows how readable a page stays under the material. Every map on the element is computed by
+the a2ui-paint optics engine on the server; the page only asks for it. Drag the element to see the
+lensing move over the background. The rear light is a separate field behind the element. It fades
+to transparent inside its own box and has no mask, so it can never draw an outline.</div>
+<div id="rear"></div>
+<div id="glass"><div id="spec"></div><div class="label">Aqua Glass</div></div>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<filter id="lens" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
+<feImage id="dispmap" x="0" y="0" preserveAspectRatio="none" result="map"/>
+<feDisplacementMap id="disp" in="SourceGraphic" in2="map" xChannelSelector="R" yChannelSelector="G" result="ref"/>
+<feGaussianBlur id="fine" in="ref" stdDeviation="0" result="f"/>
+<feGaussianBlur id="wide" in="ref" stdDeviation="0" result="w"/>
+<feComposite id="mix" in="f" in2="w" operator="arithmetic" k1="0" k2="0.336" k3="0.664" k4="0"/>
+</filter></defs></svg>
+<form id="panel" onsubmit="return false">
+<h1>Material Laboratory</h1>
+<p id="support"></p>
+<label><span>Background</span><select id="bg">
+<option value="checker">Checkerboard (displacement)</option><option value="stripes">Lines (distortion)</option>
+<option value="split">Black / white (transmission)</option><option value="gradient">Gradient</option>
+<option value="rgb">RGB bands (dispersion)</option><option value="page">Page of text</option></select></label>
+<div class="row" id="sizes">
+<button type="button" data-size="120x56">Control 56</button><button type="button" data-size="420x200">Card</button>
+<button type="button" data-size="900x560">Panel 900</button></div>
+<label><span>Effect strength <output data-for="strength"></output></span><input data-q="strength" type="range" min="0" max="1" step="0.01" value="0.53"></label>
+<label><span>Hue <output data-for="hue"></output></span><input data-q="hue" type="range" min="0" max="359" value="352"></label>
+<div class="row" id="presets">
+<button type="button" data-hue="352" data-sat="0.75">Ruby</button><button type="button" data-hue="212" data-sat="0.80">Ocean</button>
+<button type="button" data-hue="158" data-sat="0.55">Mint</button><button type="button" data-hue="45" data-sat="0.70">Vanilla</button>
+<button type="button" data-hue="0" data-sat="0">Neutral</button></div>
+<fieldset><legend>Terms (ablation)</legend><div class="row">
+<label><input type="checkbox" data-term="refraction" checked> refraction</label>
+<label><input type="checkbox" data-term="scatter" checked> scattering</label>
+<label><input type="checkbox" data-term="rim" checked> rim</label>
+<label><input type="checkbox" data-term="rear"> rear light</label>
+<label><input type="checkbox" data-term="tint" checked> tint</label></div></fieldset>
+<details><summary>Expert</summary>
+<label><span>Width <output data-for="w"></output></span><input data-q="w" type="range" min="40" max="1200" value="420"></label>
+<label><span>Height <output data-for="h"></output></span><input data-q="h" type="range" min="40" max="900" value="200"></label>
+<label><span>Corner radius <output data-for="radius"></output></span><input data-q="radius" type="range" min="4" max="160" value="28"></label>
+<label><span>Profile</span><select data-q="profile"><option value="squircle">convex squircle</option><option value="circle">convex circle</option></select></label>
+<label><span>Bevel width <output data-for="bezel"></output></span><input data-q="bezel" type="range" min="4" max="80" value="17"><small>measured (shayann07): 0.6 × corner radius</small></label>
+<label><span>Thickness <output data-for="thickness"></output></span><input data-q="thickness" type="range" min="2" max="60" value="16"><small>authored (shayann07, clear): 16</small></label>
+<label><span>Depth to back face <output data-for="depth"></output></span><input data-q="depth" type="range" min="0" max="60" value="8"></label>
+<label><span>Refractive index <output data-for="ior"></output></span><input data-q="ior" type="range" min="1" max="2" step="0.01" value="1.5"><small>authored: 1.5 (all sources)</small></label>
+<label><span>Refraction <output data-for="refraction"></output></span><input data-q="refraction" type="range" min="0" max="2" step="0.05" value="1"></label>
+<label><span>Fine scattering σ <output data-for="fine"></output></span><input data-q="fine" type="range" min="0" max="4" step="0.025" value="0.875"><small>measured (shayann07): 0.875</small></label>
+<label><span>Wide scattering σ <output data-for="wide"></output></span><input data-q="wide" type="range" min="0" max="30" step="0.5" value="10"><small>measured (shayann07): 10</small></label>
+<label><span>Fine share <output data-for="share"></output></span><input data-q="share" type="range" min="0" max="1" step="0.01" value="0.336"><small>measured (shayann07): 0.336</small></label>
+<label><span>Key-light angle <output data-for="light"></output></span><input data-q="light" type="range" min="-180" max="180" value="-110"><small>authored (shayann07): (−0.35, −0.94) ≈ −110°</small></label>
+<label><span>Rim exponent <output data-for="specexp"></output></span><input data-q="specexp" type="range" min="1" max="16" value="6"><small>measured (shayann07): 6</small></label>
+<label><span>Rim opacity <output data-for="specop"></output></span><input data-q="specop" type="range" min="0" max="1" step="0.01" value="0.35"></label>
+<label><span>Rear-light intensity <output data-for="halo"></output></span><input data-q="halo" type="range" min="0" max="1" step="0.01" value="0.45"></label>
+<label><span>Rear-light saturation <output data-for="sat"></output></span><input data-q="sat" type="range" min="0" max="1" step="0.01" value="0.75"></label>
+<label><span>Tint</span><select id="tint"><option value="rgb(241 241 241 / .565)">regular: grey 241 at 56.5 % (measured, shayann07)</option>
+<option value="rgb(255 255 255 / .04)">clear: white 4 % (authored, shayann07)</option></select></label>
+</details>
+<p id="readout"></p>
+</form>
+<script>
+(function () {
+  var $ = function (s) { return document.querySelector(s); };
+  var glass = $('#glass'), spec = $('#spec'), rear = $('#rear');
+  var urls = {};
+  var lens = CSS.supports('backdrop-filter', 'url(#a)') &&
+    !!(navigator.userAgentData && navigator.userAgentData.brands.some(function (b) { return /Chrom/.test(b.brand); }));
+  document.body.classList.toggle('lens', lens);
+  $('#support').textContent = lens
+    ? 'Chromium: real refraction (SVG filter as backdrop-filter).'
+    : 'No SVG backdrop-filter here: frosted fallback (blur), no refraction.';
+
+  function val(k) { var el = document.querySelector('[data-q="' + k + '"]'); return el ? el.value : ''; }
+  function term(t) { return document.querySelector('[data-term="' + t + '"]').checked; }
+  function query(kind) {
+    var p = ['kind=' + kind];
+    document.querySelectorAll('[data-q]').forEach(function (el) { p.push(el.dataset.q + '=' + encodeURIComponent(el.value)); });
+    return '/lab/optics/map?' + p.join('&');
+  }
+  function show(el, kind, url) { if (urls[kind]) URL.revokeObjectURL(urls[kind]); urls[kind] = url; el.style.backgroundImage = 'url(' + url + ')'; }
+  function fetchMap(kind) {
+    return fetch(query(kind)).then(function (r) {
+      return r.blob().then(function (b) { return { url: URL.createObjectURL(b), h: r.headers }; });
+    });
+  }
+  var pending = 0;
+  function build() {
+    document.querySelectorAll('[data-for]').forEach(function (o) { o.textContent = val(o.dataset.for); });
+    var w = +val('w'), h = +val('h');
+    glass.style.width = w + 'px'; glass.style.height = h + 'px';
+    glass.style.borderRadius = Math.min(+val('radius'), w / 2, h / 2) + 'px';
+    glass.style.setProperty('--tint', term('tint') ? $('#tint').value : 'transparent');
+    var m = Math.round(0.6 * Math.min(w, h)) + 40;
+    rear.style.left = (glass.offsetLeft - m) + 'px'; rear.style.top = (glass.offsetTop - m) + 'px';
+    rear.style.width = (w + 2 * m) + 'px'; rear.style.height = (h + 2 * m) + 'px';
+    var id = ++pending;
+    Promise.all([fetchMap('disp'), fetchMap('spec'), fetchMap('rear&w=' + (w + 2 * m) + '&h=' + (h + 2 * m))]).then(function (r) {
+      if (id !== pending) return;
+      var d = r[0];
+      $('#dispmap').setAttribute('href', d.url);
+      if (urls.disp) URL.revokeObjectURL(urls.disp); urls.disp = d.url;
+      $('#dispmap').setAttribute('width', w); $('#dispmap').setAttribute('height', h);
+      $('#disp').setAttribute('scale', term('refraction') ? d.h.get('x-a2ui-filter-scale') : '0');
+      var sc = term('scatter');
+      $('#fine').setAttribute('stdDeviation', sc ? d.h.get('x-a2ui-filter-fine') : '0');
+      $('#wide').setAttribute('stdDeviation', sc ? d.h.get('x-a2ui-filter-wide') : '0');
+      var share = +d.h.get('x-a2ui-filter-share');
+      $('#mix').setAttribute('k2', String(share)); $('#mix').setAttribute('k3', String(1 - share));
+      show(spec, 'spec', r[1].url); spec.style.display = term('rim') ? '' : 'none';
+      show(rear, 'rear', r[2].url); rear.style.display = term('rear') ? '' : 'none';
+      $('#readout').textContent =
+        'max displacement ' + d.h.get('x-a2ui-max-displacement') + ' px · filter scale ' + d.h.get('x-a2ui-filter-scale') +
+        '\nF0 ' + d.h.get('x-a2ui-f0') + ' · element ' + w + '×' + h + ' px' +
+        '\ncompute (server, µs): displacement ' + d.h.get('x-a2ui-render-us') + ', rim ' + r[1].h.get('x-a2ui-render-us') +
+        ', rear ' + r[2].h.get('x-a2ui-render-us');
+    });
+  }
+  var timer = 0;
+  function later() { clearTimeout(timer); timer = setTimeout(build, 60); }
+  document.addEventListener('input', function (e) {
+    if (e.target.id === 'bg') { document.body.dataset.bg = e.target.value; return; }
+    later();
+  });
+  $('#sizes').addEventListener('click', function (e) {
+    var s = e.target.dataset.size; if (!s) return;
+    var wh = s.split('x');
+    document.querySelector('[data-q="w"]').value = wh[0]; document.querySelector('[data-q="h"]').value = wh[1];
+    build();
+  });
+  $('#presets').addEventListener('click', function (e) {
+    var b = e.target; if (!b.dataset.hue) return;
+    document.querySelector('[data-q="hue"]').value = b.dataset.hue;
+    document.querySelector('[data-q="sat"]').value = b.dataset.sat;
+    document.querySelector('[data-term="rear"]').checked = +b.dataset.sat > 0;
+    build();
+  });
+  var drag = null;
+  glass.addEventListener('pointerdown', function (e) { drag = [e.clientX - glass.offsetLeft, e.clientY - glass.offsetTop]; glass.setPointerCapture(e.pointerId); });
+  glass.addEventListener('pointermove', function (e) {
+    if (!drag) return;
+    glass.style.left = (e.clientX - drag[0]) + 'px'; glass.style.top = (e.clientY - drag[1]) + 'px';
+    var w = glass.offsetWidth, h = glass.offsetHeight, m = Math.round(0.6 * Math.min(w, h)) + 40;
+    rear.style.left = (glass.offsetLeft - m) + 'px'; rear.style.top = (glass.offsetTop - m) + 'px';
+  });
+  glass.addEventListener('pointerup', function () { drag = null; });
+  build();
+})();
+</script>
+</html>

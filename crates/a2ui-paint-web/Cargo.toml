@@ -12,7 +12,9 @@ description = "Railway-deployable demo of the a2ui paint tier: one resolved surf
 # The paint tier under demonstration — layout + hit-test, the pure paint-DATA
 # path. `wgpu` is deliberately NOT enabled: this binary rasterizes to SVG on the
 # server, and the container has no GPU (see Dockerfile.railway).
-a2ui-paint = { path = "../a2ui-paint" }
+# `optics-png`: the Material Laboratory (`/lab/optics`) serves the optics engine's maps
+# as PNG. Pure-Rust `png`, the same crate the `raster` feature already uses.
+a2ui-paint = { path = "../a2ui-paint", features = ["optics-png"] }
 
 # The W1 up-frame. A click becomes `Frame::ActionInvoke(..).to_le_bytes()` —
 # behavior by ADDRESS (charter T2), and the LE bytes ARE the wire form

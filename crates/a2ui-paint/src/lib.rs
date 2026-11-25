@@ -38,6 +38,11 @@ use ogar_render_askama::{ActionRef, FieldView};
 #[cfg(feature = "raster")]
 pub mod raster;
 
+/// The optical engine of the glass material: rounded-rectangle SDF, bevel profile, Snell
+/// displacement, Fresnel rim, scattering parameters and the rear-light field. Pure
+/// arithmetic; `optics-png` adds PNG encoding of the maps.
+pub mod optics;
+
 /// A rectangle in surface pixels: top-left `(x, y)`, size `(w, h)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Rect {
