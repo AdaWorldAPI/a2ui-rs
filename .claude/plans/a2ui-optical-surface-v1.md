@@ -44,9 +44,13 @@ onto `Surface` is open.
 
 ## Parity (headless Chromium, SwiftShader)
 
-`SurfaceRenderer::parity()`: (1) the shader's own sample positions and coverage through a
-debug mode into an RGBA32F target, against `Surface::sample_points` / `coverage`; (2) the
-real texture path over a 256² coordinate texture, exact texel per channel.
+`SurfaceRenderer::parity()` reports two halves that are judged separately (OPT-8,
+2026-11-25). A geometry error moves the picture and a photometric error changes its tone;
+neither half can absorb the other's error.
+
+**Geometry** (`geometry.float`, `geometry.texel`): (1) the shader's own sample positions and
+coverage through a debug mode into an RGBA32F target, against `Surface::sample_points` /
+`coverage`; (2) the real texture path over a 256² coordinate texture, exact texel per channel.
 
 | preset | interior error px p50 / p99 / max (R=G=B) | edge position max | edge coverage max | leak | texel mismatch / off-by-one |
 |---|---|---|---|---|---|
@@ -62,6 +66,34 @@ Shader-disable runs (each restored afterwards; the restored run is back to the t
 | shoulder exponent `1/p` → `1/(p+0.25)` | interior max 0.23 px on cards; droplet unchanged (it has no shoulder); texel check only 20 off-by-one |
 | red channel uses the green index | red max 0.44 px at dispersion ×12, 0 at ×0; texel 272 off-by-one |
 | coverage ramp `0.5 − sd` → `0.45 − sd` | edge coverage max 0.05 |
+
+**Photometric** (`photometric`): the real shading path (mode 0, RGBA32F) over a page of one
+uniform colour, `rgb(40, 96, 168)`. Over a uniform page, refraction and the scattering
+kernels cannot change the value, so this isolates tint, Fresnel rim, reflection and
+highlight. The CPU reference is `Surface::shade_over`, which mirrors the shader's order.
+Errors are in 1/255 per channel. Each control leaves one term out of the CPU reference and
+must disagree clearly, which proves the check can see that term; it is `null` where the
+preset does not use the term.
+
+| preset | interior max r / g / b (1/255) | edge max | leak | controls: tint / rim / reflection / highlight |
+|---|---|---|---|---|
+| droplet | 0.0025 / 0.0018 / 0.0010 | 0.00002 | 0 | – / 20.7 / – / 193.7 |
+| capsule | 0.0020 / 0.0015 / 0.0008 | 0.00002 | 0 | – / 6.6 / – / 193.8 |
+| clear-card | 0.0003 / 0.0003 / 0.0001 | 0.0004 | 0 | – / – / 68.4 / 70.9 |
+| frosted-card | 0.0003 / 0.0003 / 0.0001 | 0.0004 | 0 | – / – / 68.4 / 70.9 |
+| aqua | 0.0002 / 0.0002 / 0.0001 | 0.0003 | 0 | 58.3 / – / 44.7 / 50.8 |
+
+Disable runs prove the halves are independent. Each shader edit was restored afterwards, and
+the restored run matches the tables.
+
+| disabled | geometry | photometric |
+|---|---|---|
+| Fresnel exponent `5 → 4` | unchanged | droplet max 4.7, aqua max 11.9 /255 |
+| tint opacity `× 0.9` | unchanged | aqua max 5.8 /255; droplet (no tint) unchanged |
+| red channel uses the green index (dispersion ×12) | red max 0.44 px, texel 272 off-by-one | identical to baseline |
+
+One disable run first passed unnoticed: the page ignores `disp` in the URL, so the dispersion
+never applied and the run measured nothing. It was redone through the page's own control.
 
 The first float run read back zeros: the target texture was also bound for sampling, WebGL
 refused the draw (feedback loop) and the error was silent. The report now carries `gl_error`
