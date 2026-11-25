@@ -54,6 +54,9 @@ use ogar_render_askama::{ActionRef, FieldView};
 #[cfg(feature = "pwa")]
 mod pwa;
 
+/// The Material Laboratory: the glass material rendered from `a2ui_paint::optics`.
+mod lab;
+
 /// What the index page adds to its `<head>`: the PWA tags with `--features
 /// pwa`, nothing without it, so the default page is unchanged.
 #[cfg(feature = "pwa")]
@@ -364,7 +367,8 @@ async fn index(RawQuery(raw): RawQuery) -> impl IntoResponse {
   <a href="/?skin=grid&amp;cols=3" style="color:#7aa2f7">grid</a> ·
   <a href="/?w=420&amp;h=700&amp;skin=form" style="color:#7aa2f7">mobile</a> ·
   <a href="/html" style="color:#7aa2f7">askama html</a> ·
-  <a href="/delta.bin" style="color:#7aa2f7">the frame</a>
+  <a href="/delta.bin" style="color:#7aa2f7">the frame</a> ·
+  <a href="/lab/optics" style="color:#7aa2f7">material lab</a>
   <span style="color:#5b6478"> — one surface, many skins (T1)</span>
 </div>
 <div style="padding:0 12px 10px;color:#5b6478">
@@ -561,6 +565,7 @@ async fn main() {
         .route("/hit", post(hit))
         .route("/hit.bin", get(hit_frame))
         .route("/health", get(health));
+    let app = lab::routes(app);
     #[cfg(feature = "pwa")]
     let app = pwa::routes(app);
 

@@ -34,6 +34,10 @@ wgpu = ["dep:wgpu"]
 # embedded DejaVu font). The THIRD renderer of the one surface (HTML / GPU / PNG),
 # for checking screens with no display. Pure-Rust deps; crate stays forbid-unsafe.
 raster = ["dep:fontdue", "dep:png"]
+# PNG encoding of the optical maps (`optics::png_rgba`), for consumers that serve the
+# displacement / specular / rear-light maps as image assets. The optics math itself
+# needs no feature and no dependency.
+optics-png = ["dep:png"]
 
 # Both examples `use a2ui_paint::raster::…`, but `raster` is off by default, so
 # an undeclared example is compiled by `--all-targets` WITHOUT the module it

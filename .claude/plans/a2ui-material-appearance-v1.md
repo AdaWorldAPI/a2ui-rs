@@ -252,6 +252,18 @@ G8 — **No duplicate renderer**: after migration report-rs contains no optical 
 
 No step after A starts before the previous step's gate is green; B's G1 is the operator's.
 
+**Step B status (2026-11-25).** Started on the operator's instruction ahead of step A; B does
+not depend on A's types, and the lab carries the four colour presets locally until A provides
+the registry. Landed: `a2ui_paint::optics` (SDF, profiles, Snell cross-section, displacement and
+rim maps, filter parameters, rear-light field; `optics-png` feature for PNG encoding) and the
+Material Laboratory at `/lab/optics` in `a2ui-paint-web`, which renders only the engine's maps.
+G2, G3 and G5 are unit tests in `optics`, each disable-verified (removing the guard fails
+exactly one test). G1 is open: the operator judges `/lab/optics`. The port is faithful to the
+#209 prototype, including its known open items (softness of the backdrop, no dispersion). The
+optional ndarray feature for map generation is not added: the measured cost is 5–9 ms per
+420 × 200 map in a debug build (reported, not a gate), and a release measurement decides
+whether vectorizing is worth the dependency.
+
 ## 10. Non-goals
 
 - No production integration before G1.
