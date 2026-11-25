@@ -122,7 +122,7 @@
       root.style.setProperty('--aqua-' + k, k === 'hue' ? String(v) : (v / 100).toFixed(2));
       side.style.setProperty('--aqua-' + k, k === 'hue' ? String(v) : (v / 100).toFixed(2));
     }
-    for (const out of side.querySelectorAll('output[for]')) {
+    for (const out of side.querySelectorAll('output[for]:not([data-material-label])')) {
       const input = document.getElementById(out.getAttribute('for'));
       if (input) out.textContent = input.value + (out.dataset.unit || '');
     }
@@ -181,7 +181,10 @@
   side.addEventListener('input', (e) => {
     const t = e.target;
     if (t === mslider) {
-      setMaterial(mkeys[Number(t.value)]);
+      const key = mkeys[Number(t.value)];
+      setMaterial(key);
+      // the viewer's light belongs to Aqua Glass: carry it over when switching to it
+      if (key === 'aqua-glass') apply();
       return;
     }
     if (t.name === 'ap-amb') {
