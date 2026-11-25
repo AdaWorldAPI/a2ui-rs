@@ -9,3 +9,6 @@ crates/a2ui-graph/pkg/
 
 # No tracked Cargo.lock (no pins, 2026-10-16): builds resolve the latest heads.
 Cargo.lock
+
+# wasm-bindgen output of scripts/build-optics-wasm.sh — a build artifact.
+crates/a2ui-optics-gl/pkg/

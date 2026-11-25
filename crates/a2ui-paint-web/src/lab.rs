@@ -33,6 +33,10 @@ const PAGE: &str = include_str!("lab.html");
 /// The raindrop experiment: a movable droplet over a page of text.
 const DROP_PAGE: &str = include_str!("drop.html");
 
+/// The raindrop on the GPU: the same droplet evaluated by the WebGL2 shader of
+/// `a2ui-optics-gl` (wasm, raw WebGL2, no wgpu).
+const DROP_GL_PAGE: &str = include_str!("drop-gl.html");
+
 /// Largest map edge the server renders, px.
 const MAX_EDGE: u32 = 1600;
 
@@ -51,6 +55,50 @@ pub fn routes(app: Router) -> Router {
         .route("/lab/optics/params", get(params))
         .route("/lab/optics/drop", get(drop_page))
         .route("/lab/optics/drop/map", get(drop_map))
+        .route("/lab/optics/drop-gl", get(drop_gl_page))
+        .route("/lab/optics/gl/{file}", get(gl_file))
+}
+
+async fn drop_gl_page() -> Html<&'static str> {
+    Html(DROP_GL_PAGE)
+}
+
+/// The only files the GPU page loads, and the only ones served. A whitelist, not a
+/// sanitiser: three known names cannot traverse anywhere.
+fn gl_file_name(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "a2ui_optics_gl.js" => "text/javascript; charset=utf-8",
+        "a2ui_optics_gl_bg.wasm" => "application/wasm",
+        "a2ui_optics_gl.d.ts" => "text/plain; charset=utf-8",
+        _ => return None,
+    })
+}
+
+/// `OPTICS_GL_PKG`, else the build output of `scripts/build-optics-wasm.sh`.
+fn gl_pkg_dir() -> std::path::PathBuf {
+    std::env::var("OPTICS_GL_PKG").map_or_else(
+        |_| concat!(env!("CARGO_MANIFEST_DIR"), "/../a2ui-optics-gl/pkg").into(),
+        Into::into,
+    )
+}
+
+async fn gl_file(axum::extract::Path(file): axum::extract::Path<String>) -> Response {
+    let Some(mime) = gl_file_name(&file) else {
+        return (StatusCode::NOT_FOUND, "no such renderer file").into_response();
+    };
+    let path = gl_pkg_dir().join(&file);
+    match tokio::task::spawn_blocking(move || std::fs::read(&path).map_err(|e| (path, e))).await {
+        Ok(Ok(bytes)) => ([(header::CONTENT_TYPE, mime)], bytes).into_response(),
+        Ok(Err((path, e))) => (
+            StatusCode::NOT_FOUND,
+            format!(
+                "{} is missing: {e} — run ./scripts/build-optics-wasm.sh",
+                path.display()
+            ),
+        )
+            .into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 async fn drop_page() -> Html<&'static str> {
@@ -454,6 +502,49 @@ mod tests {
         let d = DropQuery::parse("curv=NaN&r=9999&medium=x");
         assert_eq!((d.droplet.radius, d.medium), (400.0, Medium::WATER));
         assert!((d.droplet.height / d.droplet.radius - 0.85).abs() < 1e-6);
+    }
+
+    /// The GPU page serves exactly the renderer's files and nothing else.
+    #[test]
+    fn the_gl_page_serves_only_the_renderer_files() {
+        for ok in [
+            "a2ui_optics_gl.js",
+            "a2ui_optics_gl_bg.wasm",
+            "a2ui_optics_gl.d.ts",
+        ] {
+            assert!(gl_file_name(ok).is_some(), "{ok}");
+        }
+        for bad in [
+            "../Cargo.toml",
+            "a2ui_optics_gl.js/../../x",
+            "package.json",
+            "",
+        ] {
+            assert!(gl_file_name(bad).is_none(), "{bad}");
+        }
+        assert_eq!(
+            gl_file_name("a2ui_optics_gl_bg.wasm"),
+            Some("application/wasm")
+        );
+    }
+
+    /// The GPU page drives the shared renderer; it computes no optics in JavaScript.
+    #[test]
+    fn the_gl_page_drives_the_renderer_not_a_copy() {
+        assert!(DROP_GL_PAGE.contains("/lab/optics/gl/a2ui_optics_gl.js"));
+        assert!(DROP_GL_PAGE.contains("new mod.DropRenderer"));
+        for forbidden in [
+            "Math.sqrt",
+            "Math.hypot",
+            "createImageData",
+            "putImageData",
+            "getContext('webgl",
+        ] {
+            assert!(
+                !DROP_GL_PAGE.contains(forbidden),
+                "drop-gl.html computes optics itself: {forbidden}"
+            );
+        }
     }
 
     /// The droplet page, like the card lab, computes no optics itself.
