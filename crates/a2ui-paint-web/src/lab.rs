@@ -321,6 +321,30 @@ mod tests {
         assert!(SURFACE_PAGE.contains("/lab/optics/surface/params"));
     }
 
+    /// Every background candidate the Hub fixture offers has its own rule, and the plain Hub
+    /// gradient stays the first (default) choice.
+    #[test]
+    fn every_hub_background_candidate_has_a_rule() {
+        let select = HUB_PAGE
+            .split("<select id=\"scenebg\">")
+            .nth(1)
+            .and_then(|s| s.split("</select>").next())
+            .expect("the background selector");
+        let values: Vec<&str> = select
+            .split("<option value=\"")
+            .skip(1)
+            .filter_map(|o| o.split('"').next())
+            .collect();
+        assert_eq!(values.first(), Some(&"plain"));
+        assert!(values.len() > 1);
+        for v in &values[1..] {
+            assert!(
+                HUB_PAGE.contains(&format!(".scene[data-bg={v}]{{")),
+                "no rule for {v}"
+            );
+        }
+    }
+
     /// G5 on the pages: the rear-light layer carries no mask and no clip.
     #[test]
     fn the_rear_layer_has_no_mask_or_clip() {
