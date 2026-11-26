@@ -38,8 +38,9 @@ use axum::{
 const THEME: &str = "#0f1115";
 
 /// The shell paths the worker pre-caches and may serve offline. Nothing else.
-const SHELL: [&str; 5] = [
-    "/",
+const SHELL: [&str; 6] = [
+    "/desktop",
+    "/paint",
     "/manifest.webmanifest",
     "/icons/icon.svg",
     "/icons/192.png",
@@ -67,7 +68,7 @@ pub(crate) fn routes(app: Router) -> Router {
 
 pub(crate) fn manifest_json() -> String {
     format!(
-        r#"{{"id":"/","name":"a2ui paint tier","short_name":"a2ui","start_url":"/","scope":"/","display":"standalone","background_color":"{THEME}","theme_color":"{THEME}","icons":[{{"src":"/icons/192.png","sizes":"192x192","type":"image/png"}},{{"src":"/icons/512.png","sizes":"512x512","type":"image/png"}},{{"src":"/icons/icon.svg","sizes":"any","type":"image/svg+xml"}}],"launch_handler":{{"client_mode":"focus-existing"}}}}"#
+        r#"{{"id":"/desktop","name":"Morpheus Desktop","short_name":"Morpheus","start_url":"/desktop","scope":"/","display":"standalone","background_color":"{THEME}","theme_color":"{THEME}","icons":[{{"src":"/icons/192.png","sizes":"192x192","type":"image/png"}},{{"src":"/icons/512.png","sizes":"512x512","type":"image/png"}},{{"src":"/icons/icon.svg","sizes":"any","type":"image/svg+xml"}}],"launch_handler":{{"client_mode":"focus-existing"}}}}"#
     )
 }
 
@@ -278,6 +279,7 @@ mod tests {
         let m = manifest_json();
         assert!(m.contains(r#""scope":"/""#));
         assert!(m.contains(r#""display":"standalone""#));
+        assert!(m.contains(r#""start_url":"/desktop""#));
         assert!(m.contains("/icons/192.png") && m.contains("/icons/512.png"));
         assert!(!m.contains("http"), "no foreign origin in the manifest");
     }

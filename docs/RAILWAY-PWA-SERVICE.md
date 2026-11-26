@@ -29,6 +29,9 @@ The demo serves one synthetic surface and no user data, so it needs no sign-in.
 
 | Check | Expected |
 |---|---|
+| `GET /` | `307` redirect to `/desktop` |
+| `GET /desktop` | the Morpheus desktop; `?role=guest` shows only Outlook, Teams and the paint surface |
+| `GET /paint` | the paint demo (formerly at `/`) |
 | `GET /health` | `ok` and a last line `pwa: manifest + shell-only service worker` |
 | `GET /manifest.webmanifest` | JSON, `"display":"standalone"`, scope `/` |
 | `GET /sw.js` | JavaScript, header `cache-control: no-cache` |
