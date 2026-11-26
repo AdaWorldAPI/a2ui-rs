@@ -282,10 +282,10 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 <header class="top"><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><select data-pg-bg-choice aria-label="Hintergrund" style="font:inherit;font-size:12px;border-radius:6px;border:0;padding:3px 6px"></select><button type="button" id="install" hidden>Installieren</button></header>
 <nav class="rail" aria-label="Apps">{rail}</nav>
 <main class="desk" id="desk">
-<h1>Arbeitsplatz</h1>
-<p class="lead">Microsoft-365-Apps öffnen sich als echte Web-Apps von Microsoft (↗), in einem eigenen Fenster oder der installierten App. Eigene Oberflächen öffnen sich hier als Fenster.</p>
+<h1 data-pg-on-bg>Arbeitsplatz</h1>
+<p class="lead" data-pg-on-bg>Microsoft-365-Apps öffnen sich als echte Web-Apps von Microsoft (↗), in einem eigenen Fenster oder der installierten App. Eigene Oberflächen öffnen sich hier als Fenster.</p>
 <div class="grid">{tiles}</div>
-<p class="legend">↗ = Microsoft 365, eigene Anmeldung bei Microsoft. Blaue Kacheln = Fenster auf diesem Desktop.</p>
+<p class="legend" data-pg-on-bg>↗ = Microsoft 365, eigene Anmeldung bei Microsoft. Blaue Kacheln = Fenster auf diesem Desktop.</p>
 </main>
 <footer class="task" id="task"><span class="sp"></span><span class="clock" id="clock"></span></footer>
 <script>
@@ -545,7 +545,13 @@ mod tests {
     #[tokio::test]
     async fn the_wallpapers_are_served_and_nothing_else() {
         use axum::response::IntoResponse;
-        for f in ["aurora.webp", "morning.webp", "rose.webp", "lagoon.webp"] {
+        for f in [
+            "aurora.webp",
+            "night.webp",
+            "morning.webp",
+            "rose.webp",
+            "lagoon.webp",
+        ] {
             let r = wallpaper(axum::extract::Path(f.to_string()))
                 .await
                 .into_response();

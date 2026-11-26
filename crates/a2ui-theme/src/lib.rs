@@ -205,6 +205,7 @@ assets! {
     "physical-glass/physical-glass.css" => "text/css; charset=utf-8",
     "physical-glass/physical-glass.js" => "text/javascript; charset=utf-8",
     "physical-glass/wallpapers/aurora.webp" => "image/webp",
+    "physical-glass/wallpapers/night.webp" => "image/webp",
     "physical-glass/wallpapers/morning.webp" => "image/webp",
     "physical-glass/wallpapers/rose.webp" => "image/webp",
     "physical-glass/wallpapers/lagoon.webp" => "image/webp",

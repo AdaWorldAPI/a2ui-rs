@@ -32,15 +32,26 @@
 :root[data-material="physical-glass"][data-pg-bg="aurora"] body {
   background: url("physical-glass/wallpapers/aurora.webp") center / cover fixed no-repeat, #1f3a5c;
 }
-/* The dark wallpaper: a light veil under the glass keeps dark text readable on every tile,
+/* The dark wallpapers: a light veil under the glass keeps dark text readable on every tile,
    whichever part of the picture lies behind it. */
-:root[data-material="physical-glass"][data-pg-bg="aurora"] pg-glass > pg-layer:first-child {
+:root[data-material="physical-glass"]:is([data-pg-bg="aurora"], [data-pg-bg="night"]) pg-glass > pg-layer:first-child {
   background-color: rgb(255 255 255 / .58);
 }
-:root[data-material="physical-glass"][data-pg-bg="aurora"] :is(
+:root[data-material="physical-glass"]:is([data-pg-bg="aurora"], [data-pg-bg="night"]) :is(
   .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
   .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
   background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+}
+/* Text that lies straight on a dark picture (headings, intros, legends): light lettering
+   with a soft dark shadow, readable on the picture's dark and light parts alike. Apps mark
+   such text with data-pg-on-bg; report-rs's own is listed. */
+:root[data-material="physical-glass"]:is([data-pg-bg="aurora"], [data-pg-bg="night"]) :is(
+  [data-pg-on-bg], main > h1, main > .h1-kind, .arrival-intro, .arrival-h2) {
+  color: #f3f6fb;
+  text-shadow: 0 1px 2px rgb(8 14 28 / .75), 0 0 10px rgb(8 14 28 / .45);
+}
+:root[data-material="physical-glass"][data-pg-bg="night"] body {
+  background: url("physical-glass/wallpapers/night.webp") center / cover fixed no-repeat, #16223a;
 }
 :root[data-material="physical-glass"][data-pg-bg="morning"] body {
   background: url("physical-glass/wallpapers/morning.webp") center / cover fixed no-repeat, #dfe8f6;

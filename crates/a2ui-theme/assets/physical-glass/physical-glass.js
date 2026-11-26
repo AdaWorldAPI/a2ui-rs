@@ -104,7 +104,7 @@
     });
   }
   // The background behind the glass: one list, its labels here, the choice per browser.
-  var BACKGROUNDS = [['contour', 'Konturen'], ['brushed', 'Gebürstetes Metall'], ['aurora', 'Polarlicht'],
+  var BACKGROUNDS = [['contour', 'Konturen'], ['brushed', 'Gebürstetes Metall'], ['aurora', 'Polarlicht'], ['night', 'Nacht'],
     ['morning', 'Morgenlicht'], ['rose', 'Rosé'], ['lagoon', 'Lagune']];
   function known(v) { return BACKGROUNDS.some(function (b) { return b[0] === v; }); }
   function setBackground(v) {
