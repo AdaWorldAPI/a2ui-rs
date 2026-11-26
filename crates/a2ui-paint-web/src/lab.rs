@@ -13,7 +13,7 @@
 //! [`CONCURRENT_RENDERS`] at a time. Visual acceptance (gate G1b) is the operator's; the unit
 //! tests of `a2ui_paint::optics` cover G2, G3 and G5.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use tokio::sync::Semaphore;
@@ -41,9 +41,12 @@ const CONCURRENT_RENDERS: usize = 2;
 
 type Headers = Vec<(&'static str, String)>;
 
-fn permits() -> &'static Semaphore {
-    static P: OnceLock<Semaphore> = OnceLock::new();
-    P.get_or_init(|| Semaphore::new(CONCURRENT_RENDERS))
+/// The render permits. Each render takes an owned permit into its blocking task, so a
+/// request that is cancelled mid-render still holds its permit until the render ends.
+fn permits() -> Arc<Semaphore> {
+    static P: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    P.get_or_init(|| Arc::new(Semaphore::new(CONCURRENT_RENDERS)))
+        .clone()
 }
 
 /// Add the laboratory routes.
@@ -111,10 +114,11 @@ impl RearQuery {
 /// enters, gate G2).
 async fn rear_map(RawQuery(raw): RawQuery) -> Response {
     let q = RearQuery::parse(raw.as_deref().unwrap_or(""));
-    let Ok(_permit) = permits().acquire().await else {
+    let Ok(permit) = permits().acquire_owned().await else {
         return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
     };
     let out = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         let t = Instant::now();
         let rgba = q.render();
         let us = t.elapsed().as_micros();
@@ -162,10 +166,15 @@ async fn surface_map(RawQuery(raw): RawQuery) -> Response {
     if bw.max(bh) > 4 * MAX_EDGE {
         return (StatusCode::BAD_REQUEST, "surface too large").into_response();
     }
-    let Ok(_permit) = permits().acquire().await else {
+    let Ok(permit) = permits().acquire_owned().await else {
         return (StatusCode::SERVICE_UNAVAILABLE, "renderer closed").into_response();
     };
-    match tokio::task::spawn_blocking(move || req.render()).await {
+    match tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        req.render()
+    })
+    .await
+    {
         Ok(Ok(out)) => {
             let mut res = (
                 [

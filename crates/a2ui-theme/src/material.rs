@@ -596,6 +596,19 @@ mod tests {
             "frosted fallback before the maps arrive"
         );
         assert!(!css.contains("aqua"), "independent of Aqua Glass");
+        // every background the selector offers has its rule, every wallpaper is an asset
+        for bg in ["brushed", "aurora", "night", "morning", "rose", "lagoon"] {
+            assert!(js.contains(&format!("['{bg}', ")), "{bg} offered");
+            assert!(
+                css.contains(&format!("[data-pg-bg=\"{bg}\"] body")),
+                "{bg} drawn"
+            );
+        }
+        for w in ["aurora", "night", "morning", "rose", "lagoon"] {
+            let a = crate::asset(&format!("physical-glass/wallpapers/{w}.webp")).expect(w);
+            assert_eq!(&a.bytes[8..12], b"WEBP", "{w}");
+            assert!(css.contains(&format!("url(\"physical-glass/wallpapers/{w}.webp\")")));
+        }
     }
 
     #[test]

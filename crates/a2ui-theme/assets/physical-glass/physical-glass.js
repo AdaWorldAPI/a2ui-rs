@@ -103,8 +103,30 @@
       });
     });
   }
+  // The background behind the glass: one list, its labels here, the choice per browser.
+  var BACKGROUNDS = [['contour', 'Konturen'], ['brushed', 'Gebürstetes Metall'], ['aurora', 'Polarlicht'], ['night', 'Nacht'],
+    ['morning', 'Morgenlicht'], ['rose', 'Rosé'], ['lagoon', 'Lagune']];
+  function known(v) { return BACKGROUNDS.some(function (b) { return b[0] === v; }); }
+  function setBackground(v) {
+    if (!known(v)) v = 'contour';
+    if (v === 'contour') root.removeAttribute('data-pg-bg'); else root.setAttribute('data-pg-bg', v);
+    try { localStorage.setItem('pg.bg', v); } catch (e) {}
+    document.querySelectorAll('select[data-pg-bg-choice]').forEach(function (s) { s.value = v; });
+  }
+  function wireChoices() {
+    document.querySelectorAll('select[data-pg-bg-choice]').forEach(function (s) {
+      if (s.options.length) return;
+      BACKGROUNDS.forEach(function (b) { var o = document.createElement('option'); o.value = b[0]; o.textContent = b[1]; s.appendChild(o); });
+      s.addEventListener('change', function () { setBackground(s.value); });
+    });
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('pg.bg'); } catch (e) {}
+  setBackground(saved || 'contour');
+  window.physicalGlassBackground = setBackground;
   function later() { clearTimeout(timer); timer = setTimeout(apply, 120); }
   function start() {
+    wireChoices(); setBackground(root.getAttribute('data-pg-bg') || 'contour');
     apply();
     new MutationObserver(later).observe(root, { attributes: true, attributeFilter: ['data-material'] });
     addEventListener('resize', later);
