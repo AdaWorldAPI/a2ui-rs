@@ -143,7 +143,7 @@ pub(crate) const ICONS: [(&str, &[u8]); 11] = [
 ];
 
 /// The registry: the only source of launch targets.
-pub(crate) const APPS: [App; 10] = [
+pub(crate) const APPS: [App; 12] = [
     App {
         id: "outlook",
         label: "Outlook",
@@ -224,6 +224,25 @@ pub(crate) const APPS: [App; 10] = [
         launch: Launch::Portal(
             "https://portal.msgraph.de/view/directory/rollen-vorschau?design=classic&user=u1&v=3",
         ),
+        roles: STAFF,
+    },
+    // RPT-XLSX-PREVIEW-1 (report-rs): the portal's workbook exports as read-only previews,
+    // and from there "In GridCraft öffnen". The portal's session and role decide what the
+    // workbook holds; a role that may not have it is refused there, as for the download.
+    App {
+        id: "xlsx-kunden",
+        label: "Kundenübersicht.xlsx",
+        icon: "workspace.png",
+        hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch in GridCraft",
+        launch: Launch::Portal("https://portal.msgraph.de/view/xlsx/kunden"),
+        roles: STAFF,
+    },
+    App {
+        id: "xlsx-ansprechpartner",
+        label: "Ansprechpartner.xlsx",
+        icon: "workspace.png",
+        hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch in GridCraft",
+        launch: Launch::Portal("https://portal.msgraph.de/view/xlsx/ansprechpartner"),
         roles: STAFF,
     },
 ];
@@ -645,6 +664,26 @@ mod tests {
             "/view",
         ] {
             assert!(!allowed_portal(bad), "{bad}");
+        }
+    }
+
+    /// The portal's workbooks open as portal windows (their preview), staff only.
+    #[test]
+    fn the_workbooks_open_as_portal_windows() {
+        for (id, path) in [
+            ("xlsx-kunden", "/view/xlsx/kunden"),
+            ("xlsx-ansprechpartner", "/view/xlsx/ansprechpartner"),
+        ] {
+            let app = APPS.iter().find(|a| a.id == id).expect(id);
+            assert!(
+                matches!(app.launch, Launch::Portal(u) if allowed_portal(u) && u.ends_with(path)),
+                "{id}"
+            );
+            assert!(ids(Role::Staff).contains(&id));
+            assert!(!ids(Role::Guest).contains(&id), "{id} is not for guests");
+            assert!(page(Role::Staff).contains(&format!(
+                r#"class="tile int" data-app="{id}" data-src="https://portal.msgraph.de{path}""#
+            )));
         }
     }
 
