@@ -52,6 +52,8 @@ use axum::{
 use ogar_render_askama::{ActionRef, FieldView};
 
 #[cfg(feature = "pwa")]
+mod desktop;
+#[cfg(feature = "pwa")]
 mod pwa;
 
 /// The Material Laboratory: the glass material rendered from `a2ui_paint::optics`.
@@ -60,9 +62,9 @@ mod lab;
 /// What the index page adds to its `<head>`: the PWA tags with `--features
 /// pwa`, nothing without it, so the default page is unchanged.
 #[cfg(feature = "pwa")]
-const PWA_HEAD: &str = pwa::HEAD;
+pub(crate) const PWA_HEAD: &str = pwa::HEAD;
 #[cfg(not(feature = "pwa"))]
-const PWA_HEAD: &str = "";
+pub(crate) const PWA_HEAD: &str = "";
 
 /// The demo node every frame here addresses — a canonical 16-byte GUID.
 ///
@@ -362,10 +364,10 @@ async fn index(RawQuery(raw): RawQuery) -> impl IntoResponse {
         r##"<!doctype html><meta charset="utf-8"><title>a2ui paint tier</title>{pwa_head}
 <body style="margin:0;background:#0f1115;color:#cbd3e1;font:13px ui-sans-serif,system-ui,sans-serif">
 <div style="padding:10px 12px">
-  <a href="/?skin=form" style="color:#7aa2f7">form</a> ·
-  <a href="/?skin=flow" style="color:#7aa2f7">flow</a> ·
-  <a href="/?skin=grid&amp;cols=3" style="color:#7aa2f7">grid</a> ·
-  <a href="/?w=420&amp;h=700&amp;skin=form" style="color:#7aa2f7">mobile</a> ·
+  <a href="?skin=form" style="color:#7aa2f7">form</a> ·
+  <a href="?skin=flow" style="color:#7aa2f7">flow</a> ·
+  <a href="?skin=grid&amp;cols=3" style="color:#7aa2f7">grid</a> ·
+  <a href="?w=420&amp;h=700&amp;skin=form" style="color:#7aa2f7">mobile</a> ·
   <a href="/html" style="color:#7aa2f7">askama html</a> ·
   <a href="/delta.bin" style="color:#7aa2f7">the frame</a> ·
   <a href="/lab/optics" style="color:#7aa2f7">material lab</a>
@@ -557,8 +559,13 @@ async fn main() {
         .unwrap_or(8080);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
 
-    let app = Router::new()
-        .route("/", get(index))
+    // With `pwa`, `/` opens the Morpheus desktop and the demo lives at `/paint`.
+    let app = Router::new().route("/paint", get(index));
+    #[cfg(not(feature = "pwa"))]
+    let app = app.route("/", get(index));
+    #[cfg(feature = "pwa")]
+    let app = desktop::routes(app);
+    let app = app
         .route("/html", get(fieldview_html))
         .route("/delta.bin", get(delta_frame))
         .route("/hit", get(hit))

@@ -191,7 +191,7 @@ pub fn appearance_stop(material_key: &str, off: AquaOff) -> Option<usize> {
 /// Holo Glass is listed both as a theme and as a material: the theme carries the palette,
 /// the material carries the stylesheet, so the glass can be chosen under any theme. Holo V2
 /// shares the Holo Glass stylesheet but has its own rules (`data-material="holo-v2"`).
-pub const MATERIALS: [MaterialInfo; 7] = [
+pub const MATERIALS: [MaterialInfo; 8] = [
     MaterialInfo {
         key: NONE_KEY,
         label: "No material",
@@ -240,6 +240,16 @@ pub const MATERIALS: [MaterialInfo; 7] = [
         rendering: Rendering::Stylesheet("aqua-glass/aqua-glass.css"),
         script: Some("aqua-glass/aqua-sidecar.js"),
         uses_atmosphere: true,
+    },
+    // The ray-traced surface of `a2ui_paint::optics::surface` as an SVG backdrop filter
+    // (Chromium). The script loads the engine's maps from the app's map endpoint; without
+    // them every surface is a readable frosted pane.
+    MaterialInfo {
+        key: "physical-glass",
+        label: "Physikalisches Glas",
+        rendering: Rendering::Stylesheet("physical-glass/physical-glass.css"),
+        script: Some("physical-glass/physical-glass.js"),
+        uses_atmosphere: false,
     },
 ];
 
@@ -551,6 +561,41 @@ mod tests {
         }
         assert_eq!(offs.len(), 5, "the accepted Aqua and four review states");
         assert_eq!(appearance_stop("elevation", AquaOff::NONE), None);
+    }
+
+    /// Physikalisches Glas draws the engine's maps and computes no optics itself; its
+    /// fallback stays readable, and it never touches the frozen Aqua stylesheet.
+    #[test]
+    fn physical_glass_renders_the_engine_not_a_copy() {
+        let m = material("physical-glass").expect("physical-glass");
+        assert_eq!(m.label, "Physikalisches Glas");
+        let js = std::str::from_utf8(
+            crate::asset("physical-glass/physical-glass.js")
+                .unwrap()
+                .bytes,
+        )
+        .unwrap();
+        assert!(js.contains("/optics/surface/map") && js.contains("x-a2ui-box"));
+        for forbidden in [
+            "Math.sqrt",
+            "Math.hypot",
+            "Math.sin",
+            "createImageData",
+            "putImageData",
+        ] {
+            assert!(!js.contains(forbidden), "{forbidden}");
+        }
+        let css = std::str::from_utf8(
+            crate::asset("physical-glass/physical-glass.css")
+                .unwrap()
+                .bytes,
+        )
+        .unwrap();
+        assert!(
+            css.contains("var(--card-bg) 88%"),
+            "frosted fallback before the maps arrive"
+        );
+        assert!(!css.contains("aqua"), "independent of Aqua Glass");
     }
 
     #[test]
