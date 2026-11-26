@@ -2,11 +2,15 @@
    rendered by the browser as an SVG backdrop filter over the optical engine's maps.
    physical-glass.js measures each surface, loads the map for its size and sets the filter;
    this sheet holds only the layout of the glass layer and the background it refracts.
-   Refraction shows where lines cross a surface edge, so the page carries contour rings.
+   The page carries the Rosé wallpaper unless another background is chosen.
    Without url() backdrop filters (non-Chromium) or before the maps arrive, every surface is
    a frosted pane dense enough to read on. */
 
 :root[data-material="physical-glass"] body {
+  background: url("physical-glass/wallpapers/rose.webp") center / cover fixed no-repeat, #e7e8f4;
+}
+/* Contour rings: refraction shows best where fine lines cross a surface edge. */
+:root[data-material="physical-glass"][data-pg-bg="contour"] body {
   background:
     repeating-radial-gradient(circle at 22% 38%, transparent 0 13px, color-mix(in srgb, var(--fg) 9%, transparent) 13px 14px),
     repeating-radial-gradient(circle at 80% 70%, transparent 0 17px, color-mix(in srgb, var(--fg) 7%, transparent) 17px 18px),
@@ -15,8 +19,8 @@
 }
 :root[data-material="physical-glass"] .a2-shell { background: transparent; }
 
-/* The background, chosen per browser (physical-glass.js sets data-pg-bg on <html>; contour
-   rings when unset). Wallpaper URLs are relative to this sheet: every app serves the sheet
+/* The background, chosen per browser (physical-glass.js sets data-pg-bg on <html>; Rosé
+   when unset). Wallpaper URLs are relative to this sheet: every app serves the sheet
    at /static/physical-glass.css and the pictures at /static/physical-glass/wallpapers/. */
 :root[data-material="physical-glass"][data-pg-bg="brushed"] body {
   /* Brushed metal: fine horizontal grain at three unrelated periods, so it never repeats
@@ -55,9 +59,6 @@
 }
 :root[data-material="physical-glass"][data-pg-bg="morning"] body {
   background: url("physical-glass/wallpapers/morning.webp") center / cover fixed no-repeat, #dfe8f6;
-}
-:root[data-material="physical-glass"][data-pg-bg="rose"] body {
-  background: url("physical-glass/wallpapers/rose.webp") center / cover fixed no-repeat, #e7e8f4;
 }
 :root[data-material="physical-glass"][data-pg-bg="lagoon"] body {
   background: url("physical-glass/wallpapers/lagoon.webp") center / cover fixed no-repeat, #cfe7f6;
