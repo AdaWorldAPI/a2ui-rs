@@ -231,13 +231,13 @@ pub(crate) const APPS: [App; 13] = [
         roles: STAFF,
     },
     // RPT-XLSX-PREVIEW-1 (report-rs): the portal's workbook exports as read-only previews,
-    // and from there "In GridCraft öffnen". The portal's session and role decide what the
+    // and from there "Excel-Dokument öffnen" (the customer never sees an engine name). The portal's session and role decide what the
     // workbook holds; a role that may not have it is refused there, as for the download.
     App {
         id: "xlsx-kunden",
         label: "Kundenübersicht.xlsx",
         icon: "workspace.png",
-        hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch in GridCraft",
+        hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch als Excel-Dokument",
         launch: Launch::Portal("https://portal.msgraph.de/view/xlsx/kunden"),
         roles: STAFF,
     },
@@ -245,7 +245,7 @@ pub(crate) const APPS: [App; 13] = [
         id: "xlsx-ansprechpartner",
         label: "Ansprechpartner.xlsx",
         icon: "workspace.png",
-        hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch in GridCraft",
+        hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch als Excel-Dokument",
         launch: Launch::Portal("https://portal.msgraph.de/view/xlsx/ansprechpartner"),
         roles: STAFF,
     },
