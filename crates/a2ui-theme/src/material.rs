@@ -606,14 +606,20 @@ mod tests {
             ),
             "rose drawn without a choice"
         );
-        for bg in ["contour", "brushed", "aurora", "night", "morning", "lagoon"] {
+        for bg in [
+            "contour", "brushed", "aurora", "night", "morning", "lagoon", "mint", "pearl",
+            "crystal", "deepsea", "neon",
+        ] {
             assert!(js.contains(&format!("['{bg}', ")), "{bg} offered");
             assert!(
                 css.contains(&format!("[data-pg-bg=\"{bg}\"] body")),
                 "{bg} drawn"
             );
         }
-        for w in ["aurora", "night", "morning", "rose", "lagoon"] {
+        for w in [
+            "aurora", "night", "morning", "rose", "lagoon", "mint", "pearl", "crystal", "deepsea",
+            "neon",
+        ] {
             let a = crate::asset(&format!("physical-glass/wallpapers/{w}.webp")).expect(w);
             assert_eq!(&a.bytes[8..12], b"WEBP", "{w}");
             assert!(css.contains(&format!("url(\"physical-glass/wallpapers/{w}.webp\")")));
