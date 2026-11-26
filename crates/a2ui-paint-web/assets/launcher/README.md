@@ -1,14 +1,16 @@
 # Morpheus Desktop launcher pictograms
 
-256 × 256 RGBA PNG, transparent background, no tile, glass or wallpaper baked in.
-The desktop shows them at 32 px (rail and tiles); the glass is drawn by the tile,
-not by the picture. Supplied by the project owner on 2026-11-26.
+256 × 256 RGBA PNG. Each picture is one glass squircle with its pictogram, cut out
+of the project owner's launcher design (2026-11-26) along the squircle outline;
+outside the outline the picture is transparent. The launcher shows them at 112 px,
+the rail at 32 px.
 
 | file | app |
 |---|---|
 | `a2ui.png` | A2UI Oberfläche |
 | `service-hub.png` | Service Hub |
 | `material-lab.png` | Materiallabor |
+| `workspace.png` | Arbeitsplatz (the desktop's own mark in the top bar) |
 | `m365/outlook.png` | Outlook |
 | `m365/teams.png` | Teams |
 | `m365/word.png` | Word |

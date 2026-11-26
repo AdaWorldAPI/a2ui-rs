@@ -91,7 +91,7 @@ const STAFF: &[Role] = &[Role::Staff];
 
 /// The launcher pictograms (256 × 256 RGBA PNG, `assets/launcher/README.md`). The only
 /// files served under `/static/launcher/`.
-pub(crate) const ICONS: [(&str, &[u8]); 9] = [
+pub(crate) const ICONS: [(&str, &[u8]); 10] = [
     (
         "m365/outlook.png",
         include_bytes!("../assets/launcher/m365/outlook.png"),
@@ -124,6 +124,10 @@ pub(crate) const ICONS: [(&str, &[u8]); 9] = [
     (
         "material-lab.png",
         include_bytes!("../assets/launcher/material-lab.png"),
+    ),
+    (
+        "workspace.png",
+        include_bytes!("../assets/launcher/workspace.png"),
     ),
 ];
 
@@ -233,24 +237,43 @@ fn esc(s: &str) -> String {
 
 /// One app as a launcher element: a link for external apps, a button for internal ones.
 fn app_tag(a: &App, class: &str) -> String {
-    let inner = format!(
-        r#"<img class="ico" src="/static/launcher/{i}" alt="" width="32" height="32"><span class="txt"><b>{l}</b><small>{h}</small></span>"#,
-        i = esc(a.icon),
-        l = esc(a.label),
-        h = esc(a.hint)
+    let img = format!(
+        r#"<img class="ico" src="/static/launcher/{}" alt="" width="32" height="32">"#,
+        esc(a.icon)
     );
+    let out = match a.launch {
+        Launch::External(_) => r#"<span class="out" aria-hidden="true">↗</span>"#,
+        Launch::Internal(_) => "",
+    };
+    // On the launcher grid the pictogram sits in a squircle (the glass surface) and the
+    // label below it on the background; the rail shows the pictogram alone.
+    let inner = if class == "tile" {
+        format!(
+            r#"<span class="sq">{img}{out}</span><span class="txt" data-pg-on-bg><b>{l}</b><small>{h}</small></span>"#,
+            l = esc(a.label),
+            h = esc(a.hint)
+        )
+    } else {
+        format!(
+            r#"{img}<span class="txt"><b>{l}</b><small>{h}</small></span>"#,
+            l = esc(a.label),
+            h = esc(a.hint)
+        )
+    };
     match a.launch {
         Launch::External(u) => format!(
-            r#"<a class="{class} ext" data-app="{id}" href="{u}" target="_blank" rel="noopener noreferrer" title="{l} öffnet sich in Microsoft 365 (eigenes Fenster)">{inner}<span class="out" aria-hidden="true">↗</span></a>"#,
+            r#"<a class="{class} ext" data-app="{id}" href="{u}" target="_blank" rel="noopener noreferrer" title="{l}: {h} (öffnet sich in Microsoft 365, eigenes Fenster)">{inner}</a>"#,
             id = a.id,
             u = esc(u),
-            l = esc(a.label)
+            l = esc(a.label),
+            h = esc(a.hint)
         ),
         Launch::Internal(p) => format!(
-            r#"<button type="button" class="{class} int" data-app="{id}" data-src="{p}" data-title="{l}">{inner}</button>"#,
+            r#"<button type="button" class="{class} int" data-app="{id}" data-src="{p}" data-title="{l}" title="{l}: {h}">{inner}</button>"#,
             id = a.id,
             p = esc(p),
-            l = esc(a.label)
+            l = esc(a.label),
+            h = esc(a.hint)
         ),
     }
 }
@@ -269,7 +292,7 @@ pub(crate) fn page(role: Role) -> String {
 const PAGE: &str = r##"<!doctype html><html lang="de"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Morpheus Desktop</title>{pwa_head}
-<link rel="stylesheet" href="/static/physical-glass.css"><script src="/static/physical-glass.js" data-map="/lab/optics/surface/map" data-surfaces=".tile" defer></script>
+<link rel="stylesheet" href="/static/physical-glass.css"><script src="/static/physical-glass.js" data-map="/lab/optics/surface/map" data-surfaces=":not(*)" defer></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -287,12 +310,20 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 .desk{position:relative;overflow:hidden;padding:22px}
 .desk h1{margin:0 0 4px;font-size:20px}
 .desk p.lead{margin:0 0 18px;color:#4c5869;max-width:720px}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px;max-width:1100px}
-.tile{position:relative;display:flex;gap:12px;align-items:center;padding:14px;border-radius:12px;background:#fff;border:1px solid #d6dce5;text-decoration:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.tile:hover,.tile:focus-visible{border-color:#2f6fd6;box-shadow:0 2px 10px rgba(31,42,58,.12)}
-.tile .txt{display:flex;flex-direction:column;min-width:0}
-.tile small{color:#5b6677}
-.tile .out{position:absolute;top:8px;right:10px;color:#5b6677}
+/* The launcher: an app grid. Each app is a squircle (the glass surface) holding its
+   pictogram, the label below it on the background, the description as tooltip. */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,112px);gap:26px 30px;max-width:1100px}
+.tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:9px;width:112px;padding:0;border:0;background:none;text-decoration:none;color:inherit;font:inherit;text-align:center;cursor:pointer}
+.tile .sq{position:relative;display:block;width:112px;height:112px;border-radius:26px;transition:transform .12s ease,filter .12s ease;filter:drop-shadow(0 8px 14px rgba(31,42,58,.2))}
+.tile .ico{display:block;width:112px;height:112px}
+.tile:hover .sq{transform:translateY(-2px);filter:drop-shadow(0 12px 20px rgba(31,42,58,.28))}
+.tile:focus-visible .sq{outline:2px solid #2f6fd6;outline-offset:3px}
+.tile:focus-visible{outline:none}
+.tile .txt{display:block;font-size:14px;line-height:1.25}
+.tile .txt b{font-weight:500}
+.tile small{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.tile .out{position:absolute;top:-6px;right:-6px;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#fff;color:#3b4a60;font-size:12px;box-shadow:0 2px 6px rgba(31,42,58,.25)}
+.brandmark{width:26px;height:26px}
 .legend{margin-top:16px;color:#5b6677;font-size:12px}
 .win{position:absolute;display:flex;flex-direction:column;background:#fff;border:1px solid #b9c2cf;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,45,.25);overflow:hidden;min-width:320px;min-height:200px;resize:both}
 .win .bar{display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 12px;background:#eef2f7;border-bottom:1px solid #d6dce5;cursor:move;user-select:none}
@@ -309,14 +340,12 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 @media (max-width:640px){body{grid-template-columns:0 1fr}.rail{display:none}}
 /* Physikalisches Glas is the shared a2ui-theme material (physical-glass.css / .js): the
    ray-traced surface of a2ui_paint::optics::surface as an SVG backdrop filter over the
-   engine's maps. Here only the tile's own fallback and clear state. */
+   engine's maps. The launcher icons carry their own glass, so on the desktop the
+   material selects no surface (data-surfaces=":not(*)") and only sets the background. */
 :root{--fg:#1b2430;--bg:#e8ecf2;--card-bg:#fff;--border:#d6dce5}
-:root[data-material="physical-glass"] .tile{isolation:isolate;background:color-mix(in srgb,var(--card-bg) 88%,transparent)}
-:root[data-material="physical-glass"][data-pg-optics] .tile:has(> pg-glass[data-ready]){background:transparent;border-color:transparent}
-:root[data-material="physical-glass"] .tile:hover,:root[data-material="physical-glass"] .tile:focus-visible{border-color:rgba(47,111,214,.6)}
 </style>
 <body data-role="{role}">
-<header class="top"><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><select data-pg-bg-choice aria-label="Hintergrund" style="font:inherit;font-size:12px;border-radius:6px;border:0;padding:3px 6px"></select><button type="button" id="install" hidden>Installieren</button></header>
+<header class="top"><img class="brandmark" src="/static/launcher/workspace.png" alt=""><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><select data-pg-bg-choice aria-label="Hintergrund" style="font:inherit;font-size:12px;border-radius:6px;border:0;padding:3px 6px"></select><button type="button" id="install" hidden>Installieren</button></header>
 <nav class="rail" aria-label="Apps">{rail}</nav>
 <main class="desk" id="desk">
 <h1 data-pg-on-bg>Arbeitsplatz</h1>
