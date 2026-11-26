@@ -27,11 +27,12 @@
 /* With the maps loaded: the surface itself is clear; its glass layer refracts. */
 :root[data-material="physical-glass"][data-pg-optics] :is(
   .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
-  .shell[data-state="arrival"] nav.leftnav :is(a, span)):has(> .pg-glass[data-ready]) {
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)):has(> pg-glass[data-ready]) {
   background: transparent;
   border-color: transparent;
 }
-.pg-glass {
+pg-glass {
+  display: block;
   position: absolute;
   left: -1px;
   top: -1px;
@@ -39,17 +40,18 @@
   pointer-events: none;
   border-radius: inherit;
 }
-.pg-glass > span {
+pg-glass > pg-layer {
+  display: block;
   position: absolute;
   inset: 0;
   border-radius: inherit;
   background-size: 100% 100%;
 }
-:root:not([data-material="physical-glass"]) .pg-glass { display: none; }
+:root:not([data-material="physical-glass"]) pg-glass { display: none; }
 
 @media (prefers-reduced-transparency: reduce), (forced-colors: active) {
   :root[data-material="physical-glass"] body { background: var(--bg); }
-  :root[data-material="physical-glass"] .pg-glass { display: none; }
+  :root[data-material="physical-glass"] pg-glass { display: none; }
   :root[data-material="physical-glass"][data-pg-optics] :is(
     .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
     .shell[data-state="arrival"] nav.leftnav :is(a, span)) {

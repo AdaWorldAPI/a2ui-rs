@@ -275,7 +275,7 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
    engine's maps. Here only the tile's own fallback and clear state. */
 :root{--fg:#1b2430;--bg:#e8ecf2;--card-bg:#fff;--border:#d6dce5}
 :root[data-material="physical-glass"] .tile{isolation:isolate;background:color-mix(in srgb,var(--card-bg) 88%,transparent)}
-:root[data-material="physical-glass"][data-pg-optics] .tile:has(> .pg-glass[data-ready]){background:transparent;border-color:transparent}
+:root[data-material="physical-glass"][data-pg-optics] .tile:has(> pg-glass[data-ready]){background:transparent;border-color:transparent}
 :root[data-material="physical-glass"] .tile:hover,:root[data-material="physical-glass"] .tile:focus-visible{border-color:rgba(47,111,214,.6)}
 </style>
 <body data-role="{role}">

@@ -71,11 +71,14 @@
     }).catch(function () { return null; });
     return b;
   }
+  // The glass layer is its own element name, so no app rule for span/div/i reaches it
+  // and the surface selector can never select the layer itself.
   function glassOf(s) {
-    for (var i = 0; i < s.children.length; i++) if (s.children[i].classList.contains('pg-glass')) return s.children[i];
-    var g = document.createElement('span');
-    g.className = 'pg-glass'; g.setAttribute('aria-hidden', 'true');
-    g.innerHTML = '<span class="pg-rim"></span><span class="pg-spec"></span>';
+    for (var i = 0; i < s.children.length; i++) if (s.children[i].localName === 'pg-glass') return s.children[i];
+    var g = document.createElement('pg-glass');
+    g.setAttribute('aria-hidden', 'true');
+    g.appendChild(document.createElement('pg-layer'));
+    g.appendChild(document.createElement('pg-layer'));
     s.insertBefore(g, s.firstChild);
     return g;
   }
@@ -83,6 +86,7 @@
     if (!on() || !supported()) { root.removeAttribute('data-pg-optics'); return; }
     root.setAttribute('data-pg-optics', '');
     document.querySelectorAll(SURF).forEach(function (s) {
+      if (s.closest('pg-glass')) return;
       var w = s.offsetWidth, h = s.offsetHeight;
       if (w < 16 || h < 16) return;
       var r = parseFloat(getComputedStyle(s).borderTopLeftRadius) || 0;
