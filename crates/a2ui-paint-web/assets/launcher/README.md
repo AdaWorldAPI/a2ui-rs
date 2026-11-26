@@ -12,6 +12,7 @@ the rail at 32 px.
 | `material-lab.png` | Materiallabor |
 | `workspace.png` | Arbeitsplatz (the desktop's own mark in the top bar) |
 | `aduc.png` | Active Directory (ADUC view of the portal). Drawn for this repository on 2026-11-26 in the style of the launcher design; not cut from it |
+| `word-docs.png` | Word-Dokumente (the portal's document windows). Drawn for this repository on 2026-11-26 by a script (Pillow: a page with text lines on a glass squircle); not a Microsoft mark |
 | `m365/outlook.png` | Outlook |
 | `m365/teams.png` | Teams |
 | `m365/word.png` | Word |

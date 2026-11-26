@@ -101,7 +101,7 @@ const STAFF: &[Role] = &[Role::Staff];
 
 /// The launcher pictograms (256 × 256 RGBA PNG, `assets/launcher/README.md`). The only
 /// files served under `/static/launcher/`.
-pub(crate) const ICONS: [(&str, &[u8]); 11] = [
+pub(crate) const ICONS: [(&str, &[u8]); 12] = [
     (
         "m365/outlook.png",
         include_bytes!("../assets/launcher/m365/outlook.png"),
@@ -140,10 +140,14 @@ pub(crate) const ICONS: [(&str, &[u8]); 11] = [
         include_bytes!("../assets/launcher/workspace.png"),
     ),
     ("aduc.png", include_bytes!("../assets/launcher/aduc.png")),
+    (
+        "word-docs.png",
+        include_bytes!("../assets/launcher/word-docs.png"),
+    ),
 ];
 
 /// The registry: the only source of launch targets.
-pub(crate) const APPS: [App; 12] = [
+pub(crate) const APPS: [App; 13] = [
     App {
         id: "outlook",
         label: "Outlook",
@@ -243,6 +247,16 @@ pub(crate) const APPS: [App; 12] = [
         icon: "workspace.png",
         hint: "Arbeitsmappe als Vorschau (schreibgeschützt), auf Wunsch in GridCraft",
         launch: Launch::Portal("https://portal.msgraph.de/view/xlsx/ansprechpartner"),
+        roles: STAFF,
+    },
+    App {
+        id: "word-docs",
+        label: "Word-Dokumente",
+        icon: "word-docs.png",
+        hint: "Kundendokumente ansehen (Vorschau, nur lesen)",
+        // The portal's documents of the signed-in viewer's customers, each opening
+        // as a preview with "Word-Dokument öffnen" (view only) in this window.
+        launch: Launch::Portal("https://portal.msgraph.de/view/word"),
         roles: STAFF,
     },
 ];
@@ -647,6 +661,20 @@ mod tests {
 
     /// The ADUC view opens as an internal window on our own portal; a portal launch passes
     /// only for the portal host, and staff only.
+    #[test]
+    fn the_word_documents_open_as_a_portal_window_for_staff_only() {
+        let word = APPS
+            .iter()
+            .find(|a| a.id == "word-docs")
+            .expect("word-docs");
+        assert!(matches!(word.launch, Launch::Portal(u) if allowed_portal(u)));
+        assert!(ids(Role::Staff).contains(&"word-docs"));
+        assert!(!ids(Role::Guest).contains(&"word-docs"));
+        let p = page(Role::Staff);
+        assert!(p.contains(r#"class="tile int" data-app="word-docs" data-src="https://portal.msgraph.de/view/word""#));
+        assert!(ICONS.iter().any(|(name, _)| *name == word.icon));
+    }
+
     #[test]
     fn the_aduc_view_opens_as_a_portal_window() {
         let aduc = APPS.iter().find(|a| a.id == "aduc").expect("aduc");
