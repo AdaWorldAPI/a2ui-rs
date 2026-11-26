@@ -1,0 +1,59 @@
+/* Physikalisches Glas: the ray-traced surface of a2ui_paint::optics::surface (clear card),
+   rendered by the browser as an SVG backdrop filter over the optical engine's maps.
+   physical-glass.js measures each surface, loads the map for its size and sets the filter;
+   this sheet holds only the layout of the glass layer and the background it refracts.
+   Refraction shows where lines cross a surface edge, so the page carries contour rings.
+   Without url() backdrop filters (non-Chromium) or before the maps arrive, every surface is
+   a frosted pane dense enough to read on. */
+
+:root[data-material="physical-glass"] body {
+  background:
+    repeating-radial-gradient(circle at 22% 38%, transparent 0 13px, color-mix(in srgb, var(--fg) 9%, transparent) 13px 14px),
+    repeating-radial-gradient(circle at 80% 70%, transparent 0 17px, color-mix(in srgb, var(--fg) 7%, transparent) 17px 18px),
+    var(--bg);
+  background-attachment: fixed;
+}
+:root[data-material="physical-glass"] .a2-shell { background: transparent; }
+
+:root[data-material="physical-glass"] :is(
+  .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+  position: relative;
+  isolation: isolate;
+  border-color: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: color-mix(in srgb, var(--card-bg) 88%, transparent);
+}
+
+/* With the maps loaded: the surface itself is clear; its glass layer refracts. */
+:root[data-material="physical-glass"][data-pg-optics] :is(
+  .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)):has(> .pg-glass[data-ready]) {
+  background: transparent;
+  border-color: transparent;
+}
+.pg-glass {
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+.pg-glass > span {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-size: 100% 100%;
+}
+:root:not([data-material="physical-glass"]) .pg-glass { display: none; }
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  :root[data-material="physical-glass"] body { background: var(--bg); }
+  :root[data-material="physical-glass"] .pg-glass { display: none; }
+  :root[data-material="physical-glass"][data-pg-optics] :is(
+    .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+    .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+    background: var(--card-bg);
+    border-color: var(--border);
+  }
+}

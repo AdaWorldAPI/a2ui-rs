@@ -230,6 +230,7 @@ pub(crate) fn page(role: Role) -> String {
 const PAGE: &str = r##"<!doctype html><html lang="de"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Morpheus Desktop</title>{pwa_head}
+<link rel="stylesheet" href="/static/physical-glass.css"><script src="/static/physical-glass.js" data-map="/lab/optics/surface/map" data-surfaces=".tile" defer></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -269,16 +270,13 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 .task .sp{flex:1}
 .task .clock{font-variant-numeric:tabular-nums;opacity:.85}
 @media (max-width:640px){body{grid-template-columns:0 1fr}.rail{display:none}}
-/* Physikalisches Glas: the ray-traced surface of a2ui_paint::optics::surface (clear card)
-   as an SVG backdrop filter over the engine's maps, over contour rings so the refraction
-   at the tile edges has lines to bend. Chromium applies url() backdrop filters; other
-   browsers show the tile without refraction. */
-body.glass .desk{background:repeating-radial-gradient(circle at 22% 38%,transparent 0 13px,rgba(24,33,43,.09) 13px 14px),repeating-radial-gradient(circle at 80% 70%,transparent 0 17px,rgba(24,33,43,.07) 17px 18px),linear-gradient(180deg,#eef1f5,#e6eaf0)}
-body.glass .tile{background:transparent;border-color:transparent;isolation:isolate}
-body.glass .tile:hover,body.glass .tile:focus-visible{border-color:rgba(47,111,214,.6)}
-.tile .glass{position:absolute;left:-1px;top:-1px;border-radius:12px;z-index:-1;pointer-events:none;-webkit-backdrop-filter:url(#phys);backdrop-filter:url(#phys)}
-.tile .glass .layer{position:absolute;inset:0;border-radius:inherit;background-size:100% 100%}
-@media (prefers-reduced-transparency:reduce),(forced-colors:active){body.glass .tile{background:Canvas;border-color:CanvasText}.tile .glass{display:none}}
+/* Physikalisches Glas is the shared a2ui-theme material (physical-glass.css / .js): the
+   ray-traced surface of a2ui_paint::optics::surface as an SVG backdrop filter over the
+   engine's maps. Here only the tile's own fallback and clear state. */
+:root{--fg:#1b2430;--bg:#e8ecf2;--card-bg:#fff;--border:#d6dce5}
+:root[data-material="physical-glass"] .tile{isolation:isolate;background:color-mix(in srgb,var(--card-bg) 88%,transparent)}
+:root[data-material="physical-glass"][data-pg-optics] .tile:has(> .pg-glass[data-ready]){background:transparent;border-color:transparent}
+:root[data-material="physical-glass"] .tile:hover,:root[data-material="physical-glass"] .tile:focus-visible{border-color:rgba(47,111,214,.6)}
 </style>
 <body data-role="{role}">
 <header class="top"><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><button type="button" id="install" hidden>Installieren</button></header>
@@ -290,15 +288,6 @@ body.glass .tile:hover,body.glass .tile:focus-visible{border-color:rgba(47,111,2
 <p class="legend">↗ = Microsoft 365, eigene Anmeldung bei Microsoft. Blaue Kacheln = Fenster auf diesem Desktop.</p>
 </main>
 <footer class="task" id="task"><span class="sp"></span><span class="clock" id="clock"></span></footer>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-<filter id="phys" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB">
-<feImage id="pmap" x="0" y="0" preserveAspectRatio="none" result="map"/>
-<feDisplacementMap id="pdg" in="SourceGraphic" in2="map" xChannelSelector="R" yChannelSelector="G" result="direct"/>
-<feGaussianBlur id="pfine" in="direct" stdDeviation="0" result="fine"/>
-<feGaussianBlur id="pwide" in="direct" stdDeviation="0" result="wide"/>
-<feComposite id="pmixDF" in="direct" in2="fine" operator="arithmetic" k1="0" k2="1" k3="0" k4="0" result="df"/>
-<feComposite id="pmixW" in="df" in2="wide" operator="arithmetic" k1="0" k2="1" k3="0" k4="0"/>
-</filter></defs></svg>
 <script>
 (function () {
   var desk = document.getElementById('desk'), task = document.getElementById('task');
@@ -357,49 +346,18 @@ body.glass .tile:hover,body.glass .tile:focus-visible{border-color:rgba(47,111,2
   var clock = document.getElementById('clock');
   function tick() { clock.textContent = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
   tick(); setInterval(tick, 15000);
-  // Physikalisches Glas: every map comes from the optics engine; this page only builds
-  // the map URLs for the measured tile size and reads the response headers.
-  var gbox = document.getElementById('glass'), gsize = '', dpr = window.devicePixelRatio || 1;
-  function blobUrl(u, apply) {
-    fetch(u).then(function (r) { if (!r.ok) throw new Error(r.status); return r.blob().then(function (b) { apply(URL.createObjectURL(b), r.headers); }); }).catch(function () {});
-  }
-  function glassMaps() {
-    var t = document.querySelector('.tile'); if (!t) return;
-    var w = Math.round(t.offsetWidth), h = Math.round(t.offsetHeight), key = w + 'x' + h + '@' + dpr;
-    if (key === gsize) return; gsize = key;
-    var q = 'dpr=' + dpr + '&preset=clear-card&w=' + w + '&h=' + h + '&cornerpx=12';
-    blobUrl('/lab/optics/surface/map?kind=disp&' + q, function (obj, hd) {
-      var box = hd.get('x-a2ui-box').split('x').map(Number), m = document.getElementById('pmap');
-      m.setAttribute('href', obj); m.setAttribute('width', box[0] / dpr); m.setAttribute('height', box[1] / dpr);
-      document.getElementById('pdg').setAttribute('scale', +hd.get('x-a2ui-scale-g') / dpr);
-      var wt = hd.get('x-a2ui-weights').split(' ').map(Number), sg = hd.get('x-a2ui-sigma').split(' ').map(Number);
-      document.getElementById('pfine').setAttribute('stdDeviation', sg[0] / dpr);
-      document.getElementById('pwide').setAttribute('stdDeviation', sg[1] / dpr);
-      document.getElementById('pmixDF').setAttribute('k2', wt[0]); document.getElementById('pmixDF').setAttribute('k3', wt[1]);
-      document.getElementById('pmixW').setAttribute('k3', wt[2]);
-      var tn = hd.get('x-a2ui-tint').split(' ').map(Number);
-      document.querySelectorAll('.tile .glass').forEach(function (g) {
-        g.style.width = box[0] / dpr + 'px'; g.style.height = box[1] / dpr + 'px';
-        g.style.background = 'rgba(' + tn[0] + ',' + tn[1] + ',' + tn[2] + ',' + tn[3] + ')';
-      });
-    });
-    blobUrl('/lab/optics/surface/map?kind=spec&' + q, function (obj) { document.querySelectorAll('.tile .specL').forEach(function (l) { l.style.backgroundImage = 'url(' + obj + ')'; }); });
-    blobUrl('/lab/optics/surface/map?kind=rim&' + q, function (obj) { document.querySelectorAll('.tile .rimL').forEach(function (l) { l.style.backgroundImage = 'url(' + obj + ')'; }); });
-  }
+  // Physikalisches Glas: the shared material script does the work; this only switches it.
+  var gbox = document.getElementById('glass');
   function setGlass(on) {
-    document.body.classList.toggle('glass', on); gbox.checked = on;
+    gbox.checked = on;
+    if (on) document.documentElement.setAttribute('data-material', 'physical-glass');
+    else document.documentElement.removeAttribute('data-material');
     try { localStorage.setItem('morpheus.glass', on ? '1' : '0'); } catch (e) {}
-    if (!on) return;
-    document.querySelectorAll('.tile').forEach(function (t) {
-      if (!t.querySelector('.glass')) t.insertAdjacentHTML('afterbegin', '<span class="glass"><span class="layer rimL"></span><span class="layer specL"></span></span>');
-    });
-    glassMaps();
   }
   var gq = new URLSearchParams(location.search).get('glass'), gs = null;
   try { gs = localStorage.getItem('morpheus.glass'); } catch (e) {}
   setGlass(gq ? gq === '1' : gs === '1');
   gbox.addEventListener('change', function () { setGlass(gbox.checked); });
-  var rt = 0; addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(function () { if (gbox.checked) glassMaps(); }, 150); });
   var deferred = null, ib = document.getElementById('install');
   addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; ib.hidden = false; });
   ib.onclick = function () { if (deferred) { deferred.prompt(); deferred = null; ib.hidden = true; } };
@@ -453,12 +411,33 @@ async fn launch_counts() -> impl IntoResponse {
     )
 }
 
+/// A file of the shared theme crate, served with its media type.
+async fn theme_asset(path: &'static str) -> impl IntoResponse {
+    match a2ui_theme::asset(path) {
+        Some(a) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, a.media_type)],
+            a.bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
 /// The desktop routes. `/` opens the desktop; the paint demo moves to `/paint`.
 pub(crate) fn routes(app: Router) -> Router {
     app.route("/", get(|| async { Redirect::temporary("/desktop") }))
         .route("/desktop", get(desktop))
         .route("/desktop/launch", post(launch))
         .route("/desktop/launches", get(launch_counts))
+        .route(
+            "/static/physical-glass.css",
+            get(|| theme_asset("physical-glass/physical-glass.css")),
+        )
+        .route(
+            "/static/physical-glass.js",
+            get(|| theme_asset("physical-glass/physical-glass.js")),
+        )
 }
 
 #[cfg(test)]
@@ -530,9 +509,10 @@ mod tests {
     #[test]
     fn the_glass_material_renders_the_engine() {
         let p = page(Role::Staff);
-        assert!(p.contains("/lab/optics/surface/map?kind=disp&"));
-        assert!(p.contains("backdrop-filter:url(#phys)"));
-        assert!(p.contains(r#"<filter id="phys""#));
+        assert!(
+            p.contains(r#"src="/static/physical-glass.js" data-map="/lab/optics/surface/map""#)
+        );
+        assert!(p.contains(r#"href="/static/physical-glass.css""#));
         for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
             assert!(!p.contains(forbidden), "{forbidden}");
         }

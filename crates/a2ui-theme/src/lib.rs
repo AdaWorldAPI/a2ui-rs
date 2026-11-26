@@ -202,6 +202,8 @@ assets! {
     "aqua-glass/aqua-glass.css" => "text/css; charset=utf-8",
     "aqua-glass/aqua-sidecar.js" => "text/javascript; charset=utf-8",
     "aqua-glass/aqua-studio.js" => "text/javascript; charset=utf-8",
+    "physical-glass/physical-glass.css" => "text/css; charset=utf-8",
+    "physical-glass/physical-glass.js" => "text/javascript; charset=utf-8",
     "holo-glass/assets/effects/ambient-glow.png" => "image/png",
     "holo-glass/assets/effects/ambient-ribbons.png" => "image/png",
     "holo-glass/assets/rail/rail_shell__active@1x.png" => "image/png",

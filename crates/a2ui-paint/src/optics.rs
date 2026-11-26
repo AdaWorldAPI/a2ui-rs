@@ -14,6 +14,8 @@
 //! Pure arithmetic, no dependencies. The `optics-png` feature adds PNG encoding of the maps
 //! for consumers that serve them as image assets.
 
+#[cfg(feature = "optics-png")]
+pub mod map_service;
 pub mod surface;
 
 /// The R/G/B/A value of "no displacement" (`feDisplacementMap` reads 128 as zero).
