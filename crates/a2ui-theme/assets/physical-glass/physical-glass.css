@@ -15,6 +15,43 @@
 }
 :root[data-material="physical-glass"] .a2-shell { background: transparent; }
 
+/* The background, chosen per browser (physical-glass.js sets data-pg-bg on <html>; contour
+   rings when unset). Wallpaper URLs are relative to this sheet: every app serves the sheet
+   at /static/physical-glass.css and the pictures at /static/physical-glass/wallpapers/. */
+:root[data-material="physical-glass"][data-pg-bg="brushed"] body {
+  /* Brushed metal: fine horizontal grain at three unrelated periods, so it never repeats
+     visibly, over a cool steel ramp with a soft gloss band. */
+  background:
+    repeating-linear-gradient(0deg, rgb(255 255 255 / .10) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(0deg, rgb(20 28 40 / .06) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(0deg, rgb(255 255 255 / .06) 0 2px, transparent 2px 13px),
+    repeating-linear-gradient(0deg, rgb(20 28 40 / .04) 0 1px, transparent 1px 29px),
+    linear-gradient(172deg, #c3c9d2 0%, #e6e9ee 32%, #f4f6f8 41%, #cfd4dc 58%, #b9c0ca 78%, #d6dbe2 100%);
+  background-attachment: fixed;
+}
+:root[data-material="physical-glass"][data-pg-bg="aurora"] body {
+  background: url("physical-glass/wallpapers/aurora.webp") center / cover fixed no-repeat, #1f3a5c;
+}
+/* The dark wallpaper: a light veil under the glass keeps dark text readable on every tile,
+   whichever part of the picture lies behind it. */
+:root[data-material="physical-glass"][data-pg-bg="aurora"] pg-glass > pg-layer:first-child {
+  background-color: rgb(255 255 255 / .58);
+}
+:root[data-material="physical-glass"][data-pg-bg="aurora"] :is(
+  .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
+  .shell[data-state="arrival"] nav.leftnav :is(a, span)) {
+  background: color-mix(in srgb, var(--card-bg) 92%, transparent);
+}
+:root[data-material="physical-glass"][data-pg-bg="morning"] body {
+  background: url("physical-glass/wallpapers/morning.webp") center / cover fixed no-repeat, #dfe8f6;
+}
+:root[data-material="physical-glass"][data-pg-bg="rose"] body {
+  background: url("physical-glass/wallpapers/rose.webp") center / cover fixed no-repeat, #e7e8f4;
+}
+:root[data-material="physical-glass"][data-pg-bg="lagoon"] body {
+  background: url("physical-glass/wallpapers/lagoon.webp") center / cover fixed no-repeat, #cfe7f6;
+}
+
 :root[data-material="physical-glass"] :is(
   .card, .wb-page, .wb-hint, .wb-inspector, .kpi, .a2-duo > section, .a2-duo > article,
   .shell[data-state="arrival"] nav.leftnav :is(a, span)) {

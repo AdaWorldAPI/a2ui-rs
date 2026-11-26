@@ -279,7 +279,7 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 :root[data-material="physical-glass"] .tile:hover,:root[data-material="physical-glass"] .tile:focus-visible{border-color:rgba(47,111,214,.6)}
 </style>
 <body data-role="{role}">
-<header class="top"><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><button type="button" id="install" hidden>Installieren</button></header>
+<header class="top"><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><select data-pg-bg-choice aria-label="Hintergrund" style="font:inherit;font-size:12px;border-radius:6px;border:0;padding:3px 6px"></select><button type="button" id="install" hidden>Installieren</button></header>
 <nav class="rail" aria-label="Apps">{rail}</nav>
 <main class="desk" id="desk">
 <h1>Arbeitsplatz</h1>
@@ -438,6 +438,30 @@ pub(crate) fn routes(app: Router) -> Router {
             "/static/physical-glass.js",
             get(|| theme_asset("physical-glass/physical-glass.js")),
         )
+        .route("/static/physical-glass/wallpapers/{file}", get(wallpaper))
+}
+
+/// A wallpaper of the shared material. Only `.webp` files the theme crate holds are served;
+/// the lookup is an exact match, so no request reaches the filesystem.
+async fn wallpaper(
+    axum::extract::Path(file): axum::extract::Path<String>,
+) -> axum::response::Response {
+    let asset = file
+        .ends_with(".webp")
+        .then(|| a2ui_theme::asset(&format!("physical-glass/wallpapers/{file}")))
+        .flatten();
+    match asset {
+        Some(a) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, a.media_type),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            a.bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 #[cfg(test)]
@@ -516,6 +540,30 @@ mod tests {
         for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
             assert!(!p.contains(forbidden), "{forbidden}");
         }
+    }
+
+    #[tokio::test]
+    async fn the_wallpapers_are_served_and_nothing_else() {
+        use axum::response::IntoResponse;
+        for f in ["aurora.webp", "morning.webp", "rose.webp", "lagoon.webp"] {
+            let r = wallpaper(axum::extract::Path(f.to_string()))
+                .await
+                .into_response();
+            assert_eq!(r.status(), StatusCode::OK, "{f}");
+            assert_eq!(r.headers()[header::CONTENT_TYPE], "image/webp");
+        }
+        for f in [
+            "README.md",
+            "../physical-glass.css",
+            "nope.webp",
+            "aurora.webp/..",
+        ] {
+            let r = wallpaper(axum::extract::Path(f.to_string()))
+                .await
+                .into_response();
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{f}");
+        }
+        assert!(page(Role::Staff).contains("data-pg-bg-choice"));
     }
 
     /// External apps are plain links opened in the click; internal ones open a window.
