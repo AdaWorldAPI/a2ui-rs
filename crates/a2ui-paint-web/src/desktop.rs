@@ -414,16 +414,40 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
   tick(); setInterval(tick, 15000);
   // Physikalisches Glas: the shared material script does the work; this only switches it.
   var gbox = document.getElementById('glass');
-  function setGlass(on) {
+  function setGlass(on, remember) {
     gbox.checked = on;
     if (on) document.documentElement.setAttribute('data-material', 'physical-glass');
     else document.documentElement.removeAttribute('data-material');
-    try { localStorage.setItem('morpheus.glass', on ? '1' : '0'); } catch (e) {}
+    if (remember) { try { localStorage.setItem('morpheus.glass', on ? '1' : '0'); } catch (e) {} }
+  }
+  // Physikalisches Glas is the default where the engine's own renderer runs here: the
+  // a2ui-optics-gl WebAssembly module loads (WASM) or its SurfaceRenderer gets a WebGL2
+  // context (WebGL). Either one switches the glass on. An explicit choice (?glass=, or the
+  // checkbox, remembered) always wins, and the probe is skipped then.
+  function probeEngine() {
+    var wasm = false;
+    return import('/lab/optics/gl/a2ui_optics_gl.js')
+      .then(function (mod) {
+        return mod.default({ module_or_path: '/lab/optics/gl/a2ui_optics_gl_bg.wasm' }).then(function () {
+          wasm = true;
+          try { var r = new mod.SurfaceRenderer(document.createElement('canvas')); r.free(); return { wasm: true, webgl: true }; }
+          catch (e) { return { wasm: true, webgl: false }; }
+        });
+      })
+      .catch(function () { return { wasm: wasm, webgl: false }; });
   }
   var gq = new URLSearchParams(location.search).get('glass'), gs = null;
   try { gs = localStorage.getItem('morpheus.glass'); } catch (e) {}
-  setGlass(gq ? gq === '1' : gs === '1');
-  gbox.addEventListener('change', function () { setGlass(gbox.checked); });
+  if (gq) setGlass(gq === '1', false);
+  else if (gs !== null) setGlass(gs === '1', false);
+  else {
+    setGlass(false, false);
+    probeEngine().then(function (cap) {
+      document.documentElement.setAttribute('data-engine', (cap.wasm ? 'wasm' : 'no-wasm') + ' ' + (cap.webgl ? 'webgl' : 'no-webgl'));
+      if ((cap.wasm || cap.webgl) && !gbox.dataset.touched) setGlass(true, false);
+    });
+  }
+  gbox.addEventListener('change', function () { gbox.dataset.touched = '1'; setGlass(gbox.checked, true); });
   var deferred = null, ib = document.getElementById('install');
   addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferred = e; ib.hidden = false; });
   ib.onclick = function () { if (deferred) { deferred.prompt(); deferred = null; ib.hidden = true; } };
@@ -625,6 +649,32 @@ mod tests {
         for forbidden in ["Math.sqrt", "Math.hypot", "createImageData", "putImageData"] {
             assert!(!p.contains(forbidden), "{forbidden}");
         }
+    }
+
+    /// Physikalisches Glas is the default where the engine's own renderer runs: the probe
+    /// loads the a2ui-optics-gl WASM module and builds its SurfaceRenderer (WebGL2); either
+    /// success switches the glass on. An explicit choice wins and skips the probe.
+    #[test]
+    fn glass_defaults_on_when_the_engine_runs_here() {
+        let p = page(Role::Staff);
+        assert!(p.contains("import('/lab/optics/gl/a2ui_optics_gl.js')"));
+        assert!(p.contains("module_or_path: '/lab/optics/gl/a2ui_optics_gl_bg.wasm'"));
+        assert!(p.contains("new mod.SurfaceRenderer("));
+        assert!(p.contains(
+            "if ((cap.wasm || cap.webgl) && !gbox.dataset.touched) setGlass(true, false);"
+        ));
+        // explicit choice first, the probe only when there is none
+        let explicit = p
+            .find("if (gq) setGlass(gq === '1', false);")
+            .expect("query wins");
+        let saved = p
+            .find("else if (gs !== null) setGlass(gs === '1', false);")
+            .expect("saved wins");
+        let probe = p.find("probeEngine().then(").expect("probe");
+        assert!(explicit < saved && saved < probe);
+        // a detected default is never written back as if the viewer had chosen it
+        assert!(p.contains("setGlass(gbox.checked, true)"));
+        assert_eq!(p.matches("setGlass(true, true)").count(), 0);
     }
 
     #[tokio::test]
