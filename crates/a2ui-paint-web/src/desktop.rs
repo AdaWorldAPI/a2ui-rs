@@ -79,7 +79,8 @@ impl Role {
 pub(crate) struct App {
     pub id: &'static str,
     pub label: &'static str,
-    pub monogram: &'static str,
+    /// The pictogram, a path below `assets/launcher/` (see [`ICONS`]).
+    pub icon: &'static str,
     pub hint: &'static str,
     pub launch: Launch,
     pub roles: &'static [Role],
@@ -88,12 +89,50 @@ pub(crate) struct App {
 const ALL: &[Role] = &[Role::Staff, Role::Guest];
 const STAFF: &[Role] = &[Role::Staff];
 
+/// The launcher pictograms (256 × 256 RGBA PNG, `assets/launcher/README.md`). The only
+/// files served under `/static/launcher/`.
+pub(crate) const ICONS: [(&str, &[u8]); 9] = [
+    (
+        "m365/outlook.png",
+        include_bytes!("../assets/launcher/m365/outlook.png"),
+    ),
+    (
+        "m365/teams.png",
+        include_bytes!("../assets/launcher/m365/teams.png"),
+    ),
+    (
+        "m365/word.png",
+        include_bytes!("../assets/launcher/m365/word.png"),
+    ),
+    (
+        "m365/excel.png",
+        include_bytes!("../assets/launcher/m365/excel.png"),
+    ),
+    (
+        "m365/onedrive.png",
+        include_bytes!("../assets/launcher/m365/onedrive.png"),
+    ),
+    (
+        "m365/sharepoint.png",
+        include_bytes!("../assets/launcher/m365/sharepoint.png"),
+    ),
+    ("a2ui.png", include_bytes!("../assets/launcher/a2ui.png")),
+    (
+        "service-hub.png",
+        include_bytes!("../assets/launcher/service-hub.png"),
+    ),
+    (
+        "material-lab.png",
+        include_bytes!("../assets/launcher/material-lab.png"),
+    ),
+];
+
 /// The registry: the only source of launch targets.
 pub(crate) const APPS: [App; 9] = [
     App {
         id: "outlook",
         label: "Outlook",
-        monogram: "O",
+        icon: "m365/outlook.png",
         hint: "E-Mail und Kalender",
         launch: Launch::External("https://outlook.office.com/mail/"),
         roles: ALL,
@@ -101,7 +140,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "teams",
         label: "Teams",
-        monogram: "T",
+        icon: "m365/teams.png",
         hint: "Chat, Besprechungen",
         launch: Launch::External("https://teams.microsoft.com/"),
         roles: ALL,
@@ -109,7 +148,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "word",
         label: "Word",
-        monogram: "W",
+        icon: "m365/word.png",
         hint: "Dokumente",
         launch: Launch::External("https://www.office.com/launch/word"),
         roles: STAFF,
@@ -117,7 +156,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "excel",
         label: "Excel",
-        monogram: "X",
+        icon: "m365/excel.png",
         hint: "Tabellen",
         launch: Launch::External("https://www.office.com/launch/excel"),
         roles: STAFF,
@@ -125,7 +164,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "onedrive",
         label: "OneDrive",
-        monogram: "D",
+        icon: "m365/onedrive.png",
         hint: "Eigene Dateien",
         launch: Launch::External("https://www.office.com/launch/onedrive"),
         roles: STAFF,
@@ -133,7 +172,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "sharepoint",
         label: "SharePoint",
-        monogram: "S",
+        icon: "m365/sharepoint.png",
         hint: "Teamseiten",
         launch: Launch::External("https://www.office.com/launch/sharepoint"),
         roles: STAFF,
@@ -141,7 +180,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "paint",
         label: "A2UI Oberfläche",
-        monogram: "A",
+        icon: "a2ui.png",
         hint: "Adressierte Oberfläche, ein Klick = eine Ordinal-Aktion",
         launch: Launch::Internal("/paint"),
         roles: ALL,
@@ -149,7 +188,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "hub",
         label: "Service Hub",
-        monogram: "H",
+        icon: "service-hub.png",
         hint: "Kacheln aus Glas (Fixture)",
         launch: Launch::Internal("/lab/optics/hub"),
         roles: STAFF,
@@ -157,7 +196,7 @@ pub(crate) const APPS: [App; 9] = [
     App {
         id: "lab",
         label: "Materiallabor",
-        monogram: "L",
+        icon: "material-lab.png",
         hint: "Optische Oberflächen",
         launch: Launch::Internal("/lab/optics"),
         roles: STAFF,
@@ -195,8 +234,8 @@ fn esc(s: &str) -> String {
 /// One app as a launcher element: a link for external apps, a button for internal ones.
 fn app_tag(a: &App, class: &str) -> String {
     let inner = format!(
-        r#"<span class="mono">{m}</span><span class="txt"><b>{l}</b><small>{h}</small></span>"#,
-        m = esc(a.monogram),
+        r#"<img class="ico" src="/static/launcher/{i}" alt="" width="32" height="32"><span class="txt"><b>{l}</b><small>{h}</small></span>"#,
+        i = esc(a.icon),
         l = esc(a.label),
         h = esc(a.hint)
     );
@@ -244,9 +283,7 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 .rail-app{position:relative;display:grid;place-items:center;width:48px;height:48px;border-radius:10px;border:0;background:transparent;text-decoration:none;color:inherit;cursor:pointer}
 .rail-app:hover,.rail-app:focus-visible{background:#e2e8f1}
 .rail-app .txt,.rail-app .out{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-.mono{flex-shrink:0;display:grid;place-items:center;width:32px;height:32px;border-radius:8px;font-weight:700;color:#fff;background:#4a5a72}
-.int .mono{background:#2f6fd6}
-.ext .mono{background:#4a5a72}
+.ico{flex-shrink:0;display:block;width:32px;height:32px;object-fit:contain}
 .desk{position:relative;overflow:hidden;padding:22px}
 .desk h1{margin:0 0 4px;font-size:20px}
 .desk p.lead{margin:0 0 18px;color:#4c5869;max-width:720px}
@@ -285,7 +322,7 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 <h1 data-pg-on-bg>Arbeitsplatz</h1>
 <p class="lead" data-pg-on-bg>Microsoft-365-Apps öffnen sich als echte Web-Apps von Microsoft (↗), in einem eigenen Fenster oder der installierten App. Eigene Oberflächen öffnen sich hier als Fenster.</p>
 <div class="grid">{tiles}</div>
-<p class="legend" data-pg-on-bg>↗ = Microsoft 365, eigene Anmeldung bei Microsoft. Blaue Kacheln = Fenster auf diesem Desktop.</p>
+<p class="legend" data-pg-on-bg>↗ = Microsoft 365, eigene Anmeldung bei Microsoft. Ohne ↗ = Fenster auf diesem Desktop.</p>
 </main>
 <footer class="task" id="task"><span class="sp"></span><span class="clock" id="clock"></span></footer>
 <script>
@@ -439,6 +476,25 @@ pub(crate) fn routes(app: Router) -> Router {
             get(|| theme_asset("physical-glass/physical-glass.js")),
         )
         .route("/static/physical-glass/wallpapers/{file}", get(wallpaper))
+        .route("/static/launcher/{*path}", get(launcher_icon))
+}
+
+/// A launcher pictogram: exact match against [`ICONS`], nothing else.
+async fn launcher_icon(
+    axum::extract::Path(path): axum::extract::Path<String>,
+) -> axum::response::Response {
+    match ICONS.iter().find(|(p, _)| *p == path) {
+        Some((_, bytes)) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "image/png"),
+                (header::CACHE_CONTROL, "public, max-age=86400"),
+            ],
+            *bytes,
+        )
+            .into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 /// A wallpaper of the shared material. Only `.webp` files the theme crate holds are served;
@@ -570,6 +626,29 @@ mod tests {
             assert_eq!(r.status(), StatusCode::NOT_FOUND, "{f}");
         }
         assert!(page(Role::Staff).contains("data-pg-bg-choice"));
+    }
+
+    /// Every app has a pictogram that is served, and only the pictograms are served.
+    #[tokio::test]
+    async fn every_app_has_a_served_pictogram() {
+        use axum::response::IntoResponse;
+        for a in APPS {
+            let r = launcher_icon(axum::extract::Path(a.icon.to_string()))
+                .await
+                .into_response();
+            assert_eq!(r.status(), StatusCode::OK, "{}", a.id);
+            assert!(page(Role::Staff).contains(&format!("src=\"/static/launcher/{}\"", a.icon)));
+        }
+        for (path, bytes) in ICONS {
+            assert_eq!(&bytes[..8], b"\x89PNG\r\n\x1a\n", "{path}");
+            assert_eq!(bytes[25], 6, "{path}: RGBA");
+        }
+        for bad in ["README.md", "../desktop.rs", "m365", "nope.png"] {
+            let r = launcher_icon(axum::extract::Path(bad.to_string()))
+                .await
+                .into_response();
+            assert_eq!(r.status(), StatusCode::NOT_FOUND, "{bad}");
+        }
     }
 
     /// External apps are plain links opened in the click; internal ones open a window.
