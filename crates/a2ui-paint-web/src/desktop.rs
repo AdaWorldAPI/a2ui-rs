@@ -254,7 +254,7 @@ pub(crate) const APPS: [App; 13] = [
         label: "Word-Dokumente",
         icon: "word-docs.png",
         hint: "Kundendokumente ansehen (Vorschau, nur lesen)",
-        // report-rs RPT-WORD-1: the customer documents of the signed-in viewer, each opening
+        // The portal's documents of the signed-in viewer's customers, each opening
         // as a preview with "Word-Dokument öffnen" (view only) in this window.
         launch: Launch::Portal("https://portal.msgraph.de/view/word"),
         roles: STAFF,
