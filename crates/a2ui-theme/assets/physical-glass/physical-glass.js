@@ -107,7 +107,8 @@
   // Rosé is the default (no data-pg-bg); only a choice made in a picker is remembered, under
   // 'pg.background' ('pg.bg' was written on every visit and is ignored).
   var DEFAULT = 'rose';
-  var BACKGROUNDS = [['rose', 'Rosé'], ['night', 'Nacht'], ['morning', 'Morgenlicht'], ['lagoon', 'Lagune'],
+  var BACKGROUNDS = [['rose', 'Rosé'], ['mint', 'Minze'], ['pearl', 'Perlmutt'], ['crystal', 'Kristall'],
+    ['morning', 'Morgenlicht'], ['lagoon', 'Lagune'], ['night', 'Nacht'], ['deepsea', 'Tiefsee'], ['neon', 'Neon'],
     ['aurora', 'Polarlicht'], ['brushed', 'Gebürstetes Metall'], ['contour', 'Konturen']];
   function known(v) { return BACKGROUNDS.some(function (b) { return b[0] === v; }); }
   function setBackground(v, remember) {
