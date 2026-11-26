@@ -12,6 +12,10 @@
 //!   browser decides, not this page. Each target is checked against [`ALLOWED_HOSTS`]
 //!   before it is rendered.
 //!
+//! - **Portal windows.** The report-rs portal (`portal.msgraph.de`, [`PORTAL_HOSTS`]) is
+//!   our own site, so its pages open as internal windows too, e.g. the ADUC view of the
+//!   directory. The portal's own sign-in applies inside the window.
+//!
 //! What it does not do: frame, paint or proxy a Microsoft page, own another origin's
 //! PWA, or sign anyone in. Microsoft 365 asks for its own Entra login. The role is a
 //! fixture (`?role=`) until slice P3 brings ZITADEL; it is not access control.
@@ -37,6 +41,10 @@ pub(crate) const ALLOWED_HOSTS: [&str; 3] = [
     "www.office.com",
 ];
 
+/// Hosts of our own portal whose pages may open in an internal window. Same site as this
+/// desktop, so the portal's session cookie is sent inside the frame.
+pub(crate) const PORTAL_HOSTS: [&str; 1] = ["portal.msgraph.de"];
+
 /// Where an app runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Launch {
@@ -44,6 +52,8 @@ pub(crate) enum Launch {
     External(&'static str),
     /// A page of this server, opened in an internal window.
     Internal(&'static str),
+    /// A page of our own portal ([`PORTAL_HOSTS`]), opened in an internal window.
+    Portal(&'static str),
 }
 
 /// Roles of the fixture. Slice P3 replaces this with a server-side session.
@@ -91,7 +101,7 @@ const STAFF: &[Role] = &[Role::Staff];
 
 /// The launcher pictograms (256 × 256 RGBA PNG, `assets/launcher/README.md`). The only
 /// files served under `/static/launcher/`.
-pub(crate) const ICONS: [(&str, &[u8]); 10] = [
+pub(crate) const ICONS: [(&str, &[u8]); 11] = [
     (
         "m365/outlook.png",
         include_bytes!("../assets/launcher/m365/outlook.png"),
@@ -129,10 +139,11 @@ pub(crate) const ICONS: [(&str, &[u8]); 10] = [
         "workspace.png",
         include_bytes!("../assets/launcher/workspace.png"),
     ),
+    ("aduc.png", include_bytes!("../assets/launcher/aduc.png")),
 ];
 
 /// The registry: the only source of launch targets.
-pub(crate) const APPS: [App; 9] = [
+pub(crate) const APPS: [App; 10] = [
     App {
         id: "outlook",
         label: "Outlook",
@@ -205,6 +216,16 @@ pub(crate) const APPS: [App; 9] = [
         launch: Launch::Internal("/lab/optics"),
         roles: STAFF,
     },
+    App {
+        id: "aduc",
+        label: "Active Directory",
+        icon: "aduc.png",
+        hint: "Benutzer und Computer (ADUC-Ansicht, synthetische Daten)",
+        launch: Launch::Portal(
+            "https://portal.msgraph.de/view/directory/rollen-vorschau?design=classic&user=u1&v=3",
+        ),
+        roles: STAFF,
+    },
 ];
 
 /// An external target passes only as `https://<allowed host>/...` with no credentials
@@ -217,6 +238,16 @@ pub(crate) fn allowed_external(url: &str) -> bool {
     ALLOWED_HOSTS.contains(&host)
 }
 
+/// A portal target passes only as `https://<portal host>/...` with no credentials and no
+/// port.
+pub(crate) fn allowed_portal(url: &str) -> bool {
+    let Some(rest) = url.strip_prefix("https://") else {
+        return false;
+    };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    PORTAL_HOSTS.contains(&host)
+}
+
 /// The apps a role may use, in registry order, with invalid external targets removed.
 pub(crate) fn projected(role: Role) -> Vec<&'static App> {
     APPS.iter()
@@ -224,6 +255,7 @@ pub(crate) fn projected(role: Role) -> Vec<&'static App> {
         .filter(|a| match a.launch {
             Launch::External(u) => allowed_external(u),
             Launch::Internal(p) => p.starts_with('/') && !p.starts_with("//"),
+            Launch::Portal(u) => allowed_portal(u),
         })
         .collect()
 }
@@ -243,7 +275,7 @@ fn app_tag(a: &App, class: &str) -> String {
     );
     let out = match a.launch {
         Launch::External(_) => r#"<span class="out" aria-hidden="true">↗</span>"#,
-        Launch::Internal(_) => "",
+        Launch::Internal(_) | Launch::Portal(_) => "",
     };
     // On the launcher grid the pictogram sits in a squircle (the glass surface) and the
     // label below it on the background; the rail shows the pictogram alone.
@@ -268,7 +300,7 @@ fn app_tag(a: &App, class: &str) -> String {
             l = esc(a.label),
             h = esc(a.hint)
         ),
-        Launch::Internal(p) => format!(
+        Launch::Internal(p) | Launch::Portal(p) => format!(
             r#"<button type="button" class="{class} int" data-app="{id}" data-src="{p}" data-title="{l}" title="{l}: {h}">{inner}</button>"#,
             id = a.id,
             p = esc(p),
@@ -328,6 +360,8 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 .win{position:absolute;display:flex;flex-direction:column;background:#fff;border:1px solid #b9c2cf;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,45,.25);overflow:hidden;min-width:320px;min-height:200px;resize:both}
 .win .bar{display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 12px;background:#eef2f7;border-bottom:1px solid #d6dce5;cursor:move;user-select:none}
 .win .bar b{flex:1;font-size:13px}
+.win .bar a{display:grid;place-items:center;width:28px;height:26px;border-radius:6px;color:inherit;text-decoration:none;font-size:14px}
+.win .bar a:hover{background:#dfe5ee}
 .win .bar button{border:0;background:transparent;width:28px;height:26px;border-radius:6px;cursor:pointer;font-size:14px}
 .win .bar button:hover{background:#dfe5ee}
 .win iframe{flex:1;border:0;width:100%}
@@ -379,9 +413,10 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
     el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
     var bar = document.createElement('div'); bar.className = 'bar';
     var t = document.createElement('b'); t.textContent = title; bar.appendChild(t);
+    var ne = document.createElement('a'); ne.href = src; ne.target = '_blank'; ne.rel = 'noopener'; ne.textContent = '↗'; ne.title = 'Als eigene Seite öffnen';
     var mn = document.createElement('button'); mn.type = 'button'; mn.textContent = '–'; mn.title = 'Minimieren';
     var cl = document.createElement('button'); cl.type = 'button'; cl.textContent = '×'; cl.title = 'Schließen';
-    bar.appendChild(mn); bar.appendChild(cl);
+    bar.appendChild(ne); bar.appendChild(mn); bar.appendChild(cl);
     var fr = document.createElement('iframe'); fr.src = src; fr.title = title;
     el.appendChild(bar); el.appendChild(fr); desk.appendChild(el);
     var btn = document.createElement('button'); btn.type = 'button'; btn.textContent = title;
@@ -392,7 +427,7 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
     cl.onclick = function () { close(id); };
     el.addEventListener('pointerdown', function () { focus(w); });
     bar.addEventListener('pointerdown', function (e) {
-      if (e.target.tagName === 'BUTTON') return;
+      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
       var sx = e.clientX, sy = e.clientY, ox = el.offsetLeft, oy = el.offsetTop;
       fr.style.pointerEvents = 'none'; bar.setPointerCapture(e.pointerId);
       function mv(ev) { el.style.left = Math.max(0, ox + ev.clientX - sx) + 'px'; el.style.top = Math.max(0, oy + ev.clientY - sy) + 'px'; }
@@ -589,6 +624,28 @@ mod tests {
             }
         }
         assert_eq!(projected(Role::Staff).len(), APPS.len());
+    }
+
+    /// The ADUC view opens as an internal window on our own portal; a portal launch passes
+    /// only for the portal host, and staff only.
+    #[test]
+    fn the_aduc_view_opens_as_a_portal_window() {
+        let aduc = APPS.iter().find(|a| a.id == "aduc").expect("aduc");
+        assert!(matches!(aduc.launch, Launch::Portal(u) if allowed_portal(u)));
+        assert!(ids(Role::Staff).contains(&"aduc"));
+        assert!(!ids(Role::Guest).contains(&"aduc"));
+        let p = page(Role::Staff);
+        assert!(p.contains(r#"class="tile int" data-app="aduc" data-src="https://portal.msgraph.de/view/directory/rollen-vorschau?design=classic&amp;user=u1&amp;v=3""#));
+        for bad in [
+            "http://portal.msgraph.de/view",
+            "https://portal.msgraph.de.evil.example/",
+            "https://user@portal.msgraph.de/",
+            "https://portal.msgraph.de:8443/",
+            "https://outlook.office.com/",
+            "/view",
+        ] {
+            assert!(!allowed_portal(bad), "{bad}");
+        }
     }
 
     #[test]
