@@ -38,3 +38,44 @@ fn the_ablation_switches_ship_with_the_material() {
     assert!(js.contains("'--aqua-l-' + t"));
     assert!(js.contains("'data-aqua-glass', 'off'"));
 }
+
+/// The appearance slider switches stops by the page's data (materials, Aqua switches) and
+/// remembers both; the Aqua switches are the ablation variables, never a stylesheet edit.
+#[test]
+fn the_slider_switches_stops_through_the_ablation_variables() {
+    let js = std::str::from_utf8(
+        a2ui_theme::asset("aqua-glass/aqua-sidecar.js")
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    for needle in [
+        "dataset.materials",
+        "dataset.offs",
+        "prefix + 'aqua_off'",
+        "prefix + 'material'",
+        "root.style.setProperty('--aqua-l-' + m, '0')",
+        "root.removeAttribute('data-aqua-glass')",
+    ] {
+        assert!(js.contains(needle), "{needle}");
+    }
+    // every Aqua stop's tokens are ones the script and the stylesheet know
+    let css = std::str::from_utf8(
+        a2ui_theme::asset("aqua-glass/aqua-glass.css")
+            .unwrap()
+            .bytes,
+    )
+    .unwrap();
+    for s in a2ui_theme::APPEARANCE_STOPS {
+        let off = a2ui_theme::AquaOff::parse(s.aqua_off).expect(s.key);
+        if off.rear {
+            assert!(css.contains("var(--aqua-l-rear)"));
+        }
+        if off.beam {
+            assert!(css.contains("var(--aqua-l-beam)"));
+        }
+        if off.glass {
+            assert!(css.contains("[data-aqua-glass=\"off\"]"));
+        }
+    }
+}

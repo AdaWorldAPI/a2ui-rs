@@ -52,16 +52,138 @@ pub const NONE_KEY: &str = "none";
 /// The material in force when the viewer has no preference: Holo Glass V2.
 pub const DEFAULT_MATERIAL: &str = "holo-v2";
 
-/// The appearance sidecar's material slider, left to right: the default first, then the five
-/// further materials. Each keeps its own stylesheet and look; the slider only chooses.
-pub const SLIDER_MATERIALS: [&str; 6] = [
-    DEFAULT_MATERIAL,
-    "holo-glass",
-    "elevation",
-    "frosted",
-    "holo-v3",
-    "aqua-glass",
+/// Which of Aqua Glass's three mechanisms are switched off: the neutral glass, the rear
+/// light and the prismatic light. The accepted look has all three on. Switching one off
+/// changes no rule of the frozen stylesheet; it sets `--aqua-l-rear` / `--aqua-l-beam` to 0
+/// or `data-aqua-glass="off"`, the same switches as the review parameter `?aqua-off=`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AquaOff {
+    pub glass: bool,
+    pub rear: bool,
+    pub beam: bool,
+}
+
+impl AquaOff {
+    /// Everything on: the accepted Aqua Glass.
+    pub const NONE: AquaOff = AquaOff {
+        glass: false,
+        rear: false,
+        beam: false,
+    };
+
+    /// Parse tokens `glass`, `rear`, `beam` separated by `,` or `.` (any order, repeats
+    /// allowed). Empty or `none` is [`AquaOff::NONE`]; any other token refuses the whole
+    /// value (`None`), so a caller never applies half a setting.
+    pub fn parse(s: &str) -> Option<AquaOff> {
+        let s = s.trim();
+        let mut off = AquaOff::NONE;
+        if s.is_empty() || s.eq_ignore_ascii_case("none") {
+            return Some(off);
+        }
+        for t in s.split([',', '.']) {
+            match t.trim() {
+                "glass" => off.glass = true,
+                "rear" => off.rear = true,
+                "beam" => off.beam = true,
+                _ => return None,
+            }
+        }
+        Some(off)
+    }
+
+    /// The canonical token list, `.`-separated in the order glass, rear, beam (cookie-safe);
+    /// empty for [`AquaOff::NONE`].
+    pub fn key(self) -> String {
+        [
+            ("glass", self.glass),
+            ("rear", self.rear),
+            ("beam", self.beam),
+        ]
+        .iter()
+        .filter(|(_, on)| *on)
+        .map(|(t, _)| *t)
+        .collect::<Vec<_>>()
+        .join(".")
+    }
+
+    /// The CSS custom properties that switch the lights off, for `<html style>` (numbers only).
+    pub fn css_vars(self) -> String {
+        let mut v = String::new();
+        if self.rear {
+            v.push_str("--aqua-l-rear:0;");
+        }
+        if self.beam {
+            v.push_str("--aqua-l-beam:0;");
+        }
+        v
+    }
+}
+
+/// One stop of the appearance sidecar's slider: a material and, for Aqua Glass, which of its
+/// mechanisms are off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppearanceStop {
+    /// Stable key of the stop.
+    pub key: &'static str,
+    /// The material key (`data-material`).
+    pub material: &'static str,
+    /// For Aqua Glass: the mechanisms switched off, in [`AquaOff::parse`] tokens.
+    pub aqua_off: &'static str,
+    /// Menu label (English; an app may show its own).
+    pub label: &'static str,
+}
+
+/// The appearance sidecar's slider, left to right: Holo Glass V2 (the default), the accepted
+/// Aqua Glass (rear and prismatic light), then the four review states of the same Aqua Glass
+/// (rear light only, prismatic light only, neutral glass, light without the glass). The
+/// other materials stay choosable where an app lists [`MATERIALS`].
+pub const APPEARANCE_STOPS: [AppearanceStop; 6] = [
+    AppearanceStop {
+        key: DEFAULT_MATERIAL,
+        material: DEFAULT_MATERIAL,
+        aqua_off: "",
+        label: "Holo Glass V2",
+    },
+    AppearanceStop {
+        key: "aqua-glass",
+        material: "aqua-glass",
+        aqua_off: "",
+        label: "Aqua Glass",
+    },
+    AppearanceStop {
+        key: "aqua-rear",
+        material: "aqua-glass",
+        aqua_off: "beam",
+        label: "Aqua Glass, rear light only",
+    },
+    AppearanceStop {
+        key: "aqua-prism",
+        material: "aqua-glass",
+        aqua_off: "rear",
+        label: "Aqua Glass, prismatic light only",
+    },
+    AppearanceStop {
+        key: "aqua-neutral",
+        material: "aqua-glass",
+        aqua_off: "rear.beam",
+        label: "Aqua Glass, neutral glass",
+    },
+    AppearanceStop {
+        key: "aqua-light",
+        material: "aqua-glass",
+        aqua_off: "glass",
+        label: "Aqua light without the glass",
+    },
 ];
+
+/// The slider stop for a material and Aqua setting: the exact stop when there is one, else
+/// `None` (a material that is not on the slider).
+pub fn appearance_stop(material_key: &str, off: AquaOff) -> Option<usize> {
+    APPEARANCE_STOPS.iter().position(|s| {
+        s.material == material_key
+            && (s.material != "aqua-glass" || AquaOff::parse(s.aqua_off) == Some(off))
+    })
+}
 
 /// Every material the shared tier provides, in menu order. Each is its own design with its
 /// own rules; none is a parameter set of another.
@@ -396,18 +518,58 @@ mod tests {
     }
 
     #[test]
-    fn the_slider_starts_at_the_default_and_offers_every_material_once() {
-        assert_eq!(SLIDER_MATERIALS[0], DEFAULT_MATERIAL);
+    fn the_slider_starts_at_the_default_then_the_accepted_aqua_and_its_four_states() {
         assert_eq!(DEFAULT_MATERIAL, "holo-v2");
-        let mut keys = SLIDER_MATERIALS.to_vec();
+        assert_eq!(APPEARANCE_STOPS[0].material, DEFAULT_MATERIAL);
+        assert_eq!(APPEARANCE_STOPS[1].material, "aqua-glass");
+        assert_eq!(
+            AquaOff::parse(APPEARANCE_STOPS[1].aqua_off),
+            Some(AquaOff::NONE)
+        );
+        let mut keys: Vec<_> = APPEARANCE_STOPS.iter().map(|s| s.key).collect();
         keys.sort_unstable();
         keys.dedup();
-        assert_eq!(keys.len(), SLIDER_MATERIALS.len(), "unique");
-        for k in SLIDER_MATERIALS {
-            assert!(material(k).is_some(), "{k} is registered");
-            assert_ne!(k, NONE_KEY);
+        assert_eq!(keys.len(), APPEARANCE_STOPS.len(), "unique keys");
+        let mut offs = Vec::new();
+        for (i, s) in APPEARANCE_STOPS.iter().enumerate() {
+            assert!(material(s.material).is_some(), "{} is registered", s.key);
+            let off = AquaOff::parse(s.aqua_off).unwrap_or_else(|| panic!("{} tokens", s.key));
+            if s.material == "aqua-glass" {
+                assert!(
+                    !offs.contains(&off),
+                    "{}: each Aqua stop is a distinct state",
+                    s.key
+                );
+                offs.push(off);
+            }
+            assert_eq!(
+                appearance_stop(s.material, off),
+                Some(i),
+                "{} round-trips",
+                s.key
+            );
         }
-        assert_eq!(SLIDER_MATERIALS.len(), MATERIALS.len() - 1, "all but none");
+        assert_eq!(offs.len(), 5, "the accepted Aqua and four review states");
+        assert_eq!(appearance_stop("elevation", AquaOff::NONE), None);
+    }
+
+    #[test]
+    fn aqua_off_parses_canonically_and_refuses_unknown_tokens() {
+        assert_eq!(AquaOff::parse(""), Some(AquaOff::NONE));
+        assert_eq!(AquaOff::parse("none"), Some(AquaOff::NONE));
+        let both = AquaOff::parse("beam,rear").unwrap();
+        assert_eq!(both, AquaOff::parse("rear.beam").unwrap());
+        assert_eq!(both.key(), "rear.beam");
+        assert_eq!(both.css_vars(), "--aqua-l-rear:0;--aqua-l-beam:0;");
+        let glass = AquaOff::parse("glass").unwrap();
+        assert!(glass.glass && glass.css_vars().is_empty());
+        for bad in ["prism", "rear,", "rear;beam", "glass,x"] {
+            assert_eq!(AquaOff::parse(bad), None, "{bad}");
+        }
+        for s in APPEARANCE_STOPS {
+            let off = AquaOff::parse(s.aqua_off).unwrap();
+            assert_eq!(AquaOff::parse(&off.key()), Some(off));
+        }
     }
 
     /// Orthogonality: the atmosphere names no theme and no material, and a material names no
