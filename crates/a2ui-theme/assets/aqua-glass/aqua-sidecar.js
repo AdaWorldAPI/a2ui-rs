@@ -15,12 +15,16 @@
 // data-cookie-prefix, "report_" when absent). Hover opens it on pointer devices, a click on the
 // eye pins it, Escape closes it; touch opens it as a sheet.
 //
-// Material slider (optional): an <input type="range" data-material-slider> whose position i
-// selects the i-th key of data-keys (comma-separated, the default first), labelled by the i-th
-// entry of data-labels ("|"-separated) in <output data-material-label>. data-css maps a key to
-// the stylesheet it needs ("key=href;key=href"); a missing sheet is linked on first use. The
-// material only switches: each one keeps its own stylesheet and look. Moving a light control
-// while another material is chosen switches to aqua-glass, the material the light belongs to.
+// Appearance slider (optional): an <input type="range" data-material-slider> whose position i
+// selects stop i (a2ui_theme::APPEARANCE_STOPS). Per stop, comma-separated: data-materials
+// (the material key), data-offs (the Aqua mechanisms switched off, "."-joined `glass`/`rear`/
+// `beam` tokens, empty for none); "|"-separated data-labels for <output data-material-label>.
+// data-css maps a material to the stylesheet it needs ("key=href;key=href"); a missing sheet
+// is linked on first use. A stop only switches: the material keeps its own stylesheet, and
+// an Aqua stop sets the same switches as ?aqua-off= (no stylesheet rule changes). The choice
+// is remembered in <prefix>material and <prefix>aqua_off. Moving a light control while a
+// non-Aqua stop is chosen switches to the accepted Aqua Glass, the material the light
+// belongs to.
 (function () {
   const entry = document.querySelector('[data-appearance]');
   if (!entry) return;
@@ -39,7 +43,8 @@
   let timer = 0;
   const prefix = side.dataset.cookiePrefix || 'report_';
   const mslider = side.querySelector('[data-material-slider]');
-  const mkeys = mslider ? (mslider.dataset.keys || '').split(',') : [];
+  const mmats = mslider ? (mslider.dataset.materials || '').split(',') : [];
+  const moffs = mslider ? (mslider.dataset.offs || '').split(',') : [];
   const mlabels = mslider ? (mslider.dataset.labels || '').split('|') : [];
   const mcss = {};
   if (mslider) {
@@ -109,12 +114,25 @@
     root.setAttribute('data-material', key);
     cookie(prefix + 'material', key);
     side.dataset.aquaMaterial = key === 'aqua-glass' ? 'on' : 'off';
-    const i = mkeys.indexOf(key);
-    if (mslider && i >= 0) {
-      mslider.value = String(i);
-      const out = side.querySelector('[data-material-label]');
-      if (out) out.textContent = mlabels[i] || key;
+  }
+  // the Aqua mechanisms: the same switches as ?aqua-off=, nothing else
+  function setOff(off) {
+    const t = (off || '').split('.');
+    for (const m of ['rear', 'beam']) {
+      if (t.includes(m)) root.style.setProperty('--aqua-l-' + m, '0');
+      else root.style.removeProperty('--aqua-l-' + m);
     }
+    if (t.includes('glass')) root.setAttribute('data-aqua-glass', 'off');
+    else root.removeAttribute('data-aqua-glass');
+    cookie(prefix + 'aqua_off', off || '');
+  }
+  function setStop(i) {
+    if (!mslider || !mmats[i]) return;
+    setMaterial(mmats[i]);
+    setOff(mmats[i] === 'aqua-glass' ? moffs[i] : '');
+    mslider.value = String(i);
+    const out = side.querySelector('[data-material-label]');
+    if (out) out.textContent = mlabels[i] || mmats[i];
   }
   function apply() {
     for (const k of KEYS) {
@@ -126,7 +144,11 @@
       const input = document.getElementById(out.getAttribute('for'));
       if (input) out.textContent = input.value + (out.dataset.unit || '');
     }
-    if (root.getAttribute('data-material') !== 'aqua-glass') setMaterial('aqua-glass');
+    if (root.getAttribute('data-material') !== 'aqua-glass') {
+      const i = mmats.indexOf('aqua-glass');
+      if (i >= 0) setStop(i);
+      else setMaterial('aqua-glass');
+    }
     cookie(prefix + 'aqua', KEYS.map(value).join('.'));
     // the generated optics follow the new parameters
     window.dispatchEvent(new Event('aqua:change'));
@@ -181,10 +203,10 @@
   side.addEventListener('input', (e) => {
     const t = e.target;
     if (t === mslider) {
-      const key = mkeys[Number(t.value)];
-      setMaterial(key);
+      const i = Number(t.value);
+      setStop(i);
       // the viewer's light belongs to Aqua Glass: carry it over when switching to it
-      if (key === 'aqua-glass') apply();
+      if (mmats[i] === 'aqua-glass') apply();
       return;
     }
     if (t.name === 'ap-amb') {

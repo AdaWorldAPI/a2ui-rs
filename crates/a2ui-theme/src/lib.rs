@@ -20,8 +20,8 @@ pub const THEMES_CSS: &str = include_str!("../assets/themes.css");
 
 pub mod material;
 pub use material::{
-    AMBIENTS, Ambient, Atmosphere, DEFAULT_MATERIAL, MATERIALS, MaterialInfo, Rendering,
-    SLIDER_MATERIALS, material,
+    AMBIENTS, APPEARANCE_STOPS, Ambient, AppearanceStop, AquaOff, Atmosphere, DEFAULT_MATERIAL,
+    MATERIALS, MaterialInfo, Rendering, appearance_stop, material,
 };
 
 /// The Holo Glass material, linked only while the `holo-glass` theme is in force. It
