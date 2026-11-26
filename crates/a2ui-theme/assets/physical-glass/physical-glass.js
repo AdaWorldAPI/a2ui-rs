@@ -104,29 +104,32 @@
     });
   }
   // The background behind the glass: one list, its labels here, the choice per browser.
-  var BACKGROUNDS = [['contour', 'Konturen'], ['brushed', 'Gebürstetes Metall'], ['aurora', 'Polarlicht'], ['night', 'Nacht'],
-    ['morning', 'Morgenlicht'], ['rose', 'Rosé'], ['lagoon', 'Lagune']];
+  // Rosé is the default (no data-pg-bg); only a choice made in a picker is remembered, under
+  // 'pg.background' ('pg.bg' was written on every visit and is ignored).
+  var DEFAULT = 'rose';
+  var BACKGROUNDS = [['rose', 'Rosé'], ['night', 'Nacht'], ['morning', 'Morgenlicht'], ['lagoon', 'Lagune'],
+    ['aurora', 'Polarlicht'], ['brushed', 'Gebürstetes Metall'], ['contour', 'Konturen']];
   function known(v) { return BACKGROUNDS.some(function (b) { return b[0] === v; }); }
-  function setBackground(v) {
-    if (!known(v)) v = 'contour';
-    if (v === 'contour') root.removeAttribute('data-pg-bg'); else root.setAttribute('data-pg-bg', v);
-    try { localStorage.setItem('pg.bg', v); } catch (e) {}
+  function setBackground(v, remember) {
+    if (!known(v)) v = DEFAULT;
+    if (v === DEFAULT) root.removeAttribute('data-pg-bg'); else root.setAttribute('data-pg-bg', v);
+    if (remember) { try { localStorage.setItem('pg.background', v); } catch (e) {} }
     document.querySelectorAll('select[data-pg-bg-choice]').forEach(function (s) { s.value = v; });
   }
   function wireChoices() {
     document.querySelectorAll('select[data-pg-bg-choice]').forEach(function (s) {
       if (s.options.length) return;
       BACKGROUNDS.forEach(function (b) { var o = document.createElement('option'); o.value = b[0]; o.textContent = b[1]; s.appendChild(o); });
-      s.addEventListener('change', function () { setBackground(s.value); });
+      s.addEventListener('change', function () { setBackground(s.value, true); });
     });
   }
   var saved = null;
-  try { saved = localStorage.getItem('pg.bg'); } catch (e) {}
-  setBackground(saved || 'contour');
-  window.physicalGlassBackground = setBackground;
+  try { saved = localStorage.getItem('pg.background'); } catch (e) {}
+  setBackground(saved || DEFAULT);
+  window.physicalGlassBackground = function (v) { setBackground(v, true); };
   function later() { clearTimeout(timer); timer = setTimeout(apply, 120); }
   function start() {
-    wireChoices(); setBackground(root.getAttribute('data-pg-bg') || 'contour');
+    wireChoices(); setBackground(root.getAttribute('data-pg-bg') || DEFAULT);
     apply();
     new MutationObserver(later).observe(root, { attributes: true, attributeFilter: ['data-material'] });
     addEventListener('resize', later);

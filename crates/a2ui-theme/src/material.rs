@@ -596,8 +596,17 @@ mod tests {
             "frosted fallback before the maps arrive"
         );
         assert!(!css.contains("aqua"), "independent of Aqua Glass");
-        // every background the selector offers has its rule, every wallpaper is an asset
-        for bg in ["brushed", "aurora", "night", "morning", "rose", "lagoon"] {
+        // every background the selector offers has its rule, every wallpaper is an asset;
+        // the default (Rosé) is the rule without data-pg-bg
+        assert!(js.contains("var DEFAULT = 'rose';"), "Rosé is the default");
+        assert!(js.contains("['rose', "), "rose offered");
+        assert!(
+            css.contains(
+                ":root[data-material=\"physical-glass\"] body {\n  background: url(\"physical-glass/wallpapers/rose.webp\")"
+            ),
+            "rose drawn without a choice"
+        );
+        for bg in ["contour", "brushed", "aurora", "night", "morning", "lagoon"] {
             assert!(js.contains(&format!("['{bg}', ")), "{bg} offered");
             assert!(
                 css.contains(&format!("[data-pg-bg=\"{bg}\"] body")),
