@@ -25,6 +25,10 @@ a2ui-core = { path = "../a2ui-core" }
 # the `pwa` build serves the desktop.
 a2ui-theme = { path = "../a2ui-theme", optional = true }
 
+# The container contract (one addressed content surface as page, pane or window). Zero
+# dependencies; only the `pwa` build serves the desktop and the workspace that use it.
+a2ui-layout = { path = "../a2ui-layout", optional = true }
+
 # The addressed-surface types the paint tier consumes. Same `FieldView` /
 # `ActionRef` the askama render and the wasm client resolve — one surface.
 ogar-render-askama = { git = "https://github.com/AdaWorldAPI/OGAR", branch = "main" }
@@ -56,4 +60,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 # slice P2 of docs/MORPHEUS-PWA-APPLICATION-DESKTOP.md. Off by default, so the
 # default build and `Dockerfile.railway` are unchanged; `Dockerfile.pwa.railway`
 # builds with it on.
-pwa = ["dep:a2ui-theme"]
+pwa = ["dep:a2ui-theme", "dep:a2ui-layout"]

@@ -9,3 +9,8 @@ rust-version.workspace = true
 description = "a2ui-rs themes as permanent assets: every theme's palette and stylesheet, the Holo Glass material, the rail pictures and the fonts, served from one place by every app. Only the operator's name and logo are runtime settings. Zero dependencies."
 
 [dependencies]
+
+[dev-dependencies]
+# Only for the drift test: the container script must use the header and attribute names
+# a2ui-layout defines. a2ui-layout has no dependencies either.
+a2ui-layout = { path = "../a2ui-layout" }

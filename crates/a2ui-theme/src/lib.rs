@@ -239,6 +239,10 @@ assets! {
     "fonts/TRADEMARKS-Google-Sans-Flex.md" => "text/markdown; charset=utf-8",
     "fonts/README.md" => "text/markdown; charset=utf-8",
     "fonts/font-manifest.md" => "text/markdown; charset=utf-8",
+    "containers/containers.js" => "text/javascript; charset=utf-8",
+    "containers/containers.css" => "text/css; charset=utf-8",
+    "vendor/htmx-2.0.4.min.js" => "text/javascript; charset=utf-8",
+    "vendor/htmx-LICENSE.txt" => "text/plain; charset=utf-8",
 }
 
 /// The asset at this path below the theme prefix. Exact match only, so a request path

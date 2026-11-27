@@ -105,3 +105,26 @@ einer Route mit `MainWide` und zwei Zonen-Inhalten, die es schon gibt.
 
 Farben, Schriften, Komponenten-Aussehen. Diese Schicht kennt Geometrie und
 Vokabular. Ein App-Theme setzt Tokens; die Zonen bleiben dieselben.
+
+## 7. Container: Seite, Bereich, Fenster
+
+`a2ui_layout::Container` — dieselbe adressierte Fläche in drei Behältern. Eine Route
+rendert ihren Inhalt **einmal**; die Anfrage sagt, wo er erscheint
+(`A2-Container: pane|window`, sonst die Seite). Die Antwort kommt von derselben
+kanonischen URL, mit derselben Autorisierung und demselben Kunden-Scope, `Vary:
+A2-Container` und dem Echo des ausgelieferten Behälters.
+
+1. **Nur Darstellung.** Der Behälter ändert nie, was ein Objekt ist, wer es sehen darf
+   oder welche Aktionen es hat.
+2. **Ein Fragment ist Inhalt.** Ein Wurzelelement mit `data-a2-content` (Titel in
+   `data-a2-title`), kein Dokument, keine Shell, kein `<script>` — `check_fragment` prüft
+   das.
+3. **Das Elternteil besitzt das Verhalten.** Fenster, Fokus, Ziehen, Taskleiste und die
+   geteilten Assets kommen aus `a2ui-theme` (`containers/containers.js`,
+   `containers/containers.css`); geladen wird mit htmx (`vendor/htmx-2.0.4.min.js`),
+   nicht mit eigenem Code.
+4. **Anmeldung verlässt den Behälter.** Ein Fragment, das eine Anmeldung braucht, bekommt
+   `401` mit `HX-Redirect`; eine Antwort ohne passendes Echo wird nie in den Behälter
+   gezeichnet, sondern als Seite geöffnet.
+5. **iframe nur zum echten Einbetten**: eine andere Origin oder ein Dokument, das isoliert
+   bleiben muss (`data-a2-open="embed"`). Eigene Inhalte öffnen nativ.

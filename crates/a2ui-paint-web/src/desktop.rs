@@ -50,8 +50,13 @@ pub(crate) const PORTAL_HOSTS: [&str; 1] = ["portal.msgraph.de"];
 pub(crate) enum Launch {
     /// A Microsoft 365 web app, opened by the browser outside this page.
     External(&'static str),
-    /// A page of this server, opened in an internal window.
+    /// A page of this server that is still a document of its own (a canvas or WebGL page
+    /// with its own script), opened in an embedded window until it becomes content.
     Internal(&'static str),
+    /// Addressed content of this server, opened natively in a window: the same content as
+    /// its page, delivered as a fragment under the a2ui container contract
+    /// (`a2ui_layout::Container`). No iframe, no second application shell.
+    Native(&'static str),
     /// A page of our own portal ([`PORTAL_HOSTS`]), opened in an internal window.
     Portal(&'static str),
 }
@@ -147,7 +152,7 @@ pub(crate) const ICONS: [(&str, &[u8]); 12] = [
 ];
 
 /// The registry: the only source of launch targets.
-pub(crate) const APPS: [App; 13] = [
+pub(crate) const APPS: [App; 14] = [
     App {
         id: "outlook",
         label: "Outlook",
@@ -202,6 +207,14 @@ pub(crate) const APPS: [App; 13] = [
         icon: "a2ui.png",
         hint: "Adressierte Oberfläche, ein Klick = eine Ordinal-Aktion",
         launch: Launch::Internal("/paint"),
+        roles: ALL,
+    },
+    App {
+        id: "surface",
+        label: "Adressierte Fläche",
+        icon: "a2ui.png",
+        hint: "Dieselbe Oberfläche als Seite, im zweiten Bereich oder als Fenster",
+        launch: Launch::Native("/surface"),
         roles: ALL,
     },
     App {
@@ -287,7 +300,7 @@ pub(crate) fn projected(role: Role) -> Vec<&'static App> {
         .filter(|a| a.roles.contains(&role))
         .filter(|a| match a.launch {
             Launch::External(u) => allowed_external(u),
-            Launch::Internal(p) => p.starts_with('/') && !p.starts_with("//"),
+            Launch::Internal(p) | Launch::Native(p) => p.starts_with('/') && !p.starts_with("//"),
             Launch::Portal(u) => allowed_portal(u),
         })
         .collect()
@@ -308,7 +321,7 @@ fn app_tag(a: &App, class: &str) -> String {
     );
     let out = match a.launch {
         Launch::External(_) => r#"<span class="out" aria-hidden="true">↗</span>"#,
-        Launch::Internal(_) | Launch::Portal(_) => "",
+        Launch::Internal(_) | Launch::Portal(_) | Launch::Native(_) => "",
     };
     // On the launcher grid the pictogram sits in a squircle (the glass surface) and the
     // label below it on the background; the rail shows the pictogram alone.
@@ -333,8 +346,19 @@ fn app_tag(a: &App, class: &str) -> String {
             l = esc(a.label),
             h = esc(a.hint)
         ),
+        // Our own content: a link to its page, opened natively in a window by the shared
+        // container script (a2ui-theme `containers/containers.js`).
+        Launch::Native(p) => format!(
+            r#"<a class="{class} int" data-app="{id}" href="{p}" data-a2-open="window" data-a2-id="{id}" data-a2-title="{l}" title="{l}: {h}">{inner}</a>"#,
+            id = a.id,
+            p = esc(p),
+            l = esc(a.label),
+            h = esc(a.hint)
+        ),
+        // Another origin (the portal), or a page that is still a document of its own:
+        // embedded, the one case a window holds an iframe.
         Launch::Internal(p) | Launch::Portal(p) => format!(
-            r#"<button type="button" class="{class} int" data-app="{id}" data-src="{p}" data-title="{l}" title="{l}: {h}">{inner}</button>"#,
+            r#"<button type="button" class="{class} int" data-app="{id}" data-a2-open="embed" data-a2-src="{p}" data-a2-id="{id}" data-a2-title="{l}" title="{l}: {h}">{inner}</button>"#,
             id = a.id,
             p = esc(p),
             l = esc(a.label),
@@ -358,6 +382,7 @@ const PAGE: &str = r##"<!doctype html><html lang="de"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Morpheus Desktop</title>{pwa_head}
 <link rel="stylesheet" href="/static/physical-glass.css"><script src="/static/physical-glass.js" data-map="/lab/optics/surface/map" data-surfaces=":not(*)" defer></script>
+<link rel="stylesheet" href="/static/a2ui/containers/containers.css"><script src="/static/a2ui/vendor/htmx-2.0.4.min.js" defer></script><script src="/static/a2ui/containers/containers.js" defer></script>
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
@@ -390,19 +415,11 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 .tile .out{position:absolute;top:-6px;right:-6px;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#fff;color:#3b4a60;font-size:12px;box-shadow:0 2px 6px rgba(31,42,58,.25)}
 .brandmark{width:26px;height:26px}
 .legend{margin-top:16px;color:#5b6677;font-size:12px}
-.win{position:absolute;display:flex;flex-direction:column;background:#fff;border:1px solid #b9c2cf;border-radius:10px;box-shadow:0 12px 40px rgba(20,30,45,.25);overflow:hidden;min-width:320px;min-height:200px;resize:both}
-.win .bar{display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 12px;background:#eef2f7;border-bottom:1px solid #d6dce5;cursor:move;user-select:none}
-.win .bar b{flex:1;font-size:13px}
-.win .bar a{display:grid;place-items:center;width:28px;height:26px;border-radius:6px;color:inherit;text-decoration:none;font-size:14px}
-.win .bar a:hover{background:#dfe5ee}
-.win .bar button{border:0;background:transparent;width:28px;height:26px;border-radius:6px;cursor:pointer;font-size:14px}
-.win .bar button:hover{background:#dfe5ee}
-.win iframe{flex:1;border:0;width:100%}
-.win.min{display:none}
 .task{grid-column:1/3;display:flex;align-items:center;gap:6px;padding:0 10px;background:#1f2a3a;color:#e9eef6;overflow-x:auto}
 .task button{font:inherit;font-size:12px;color:inherit;background:rgba(255,255,255,.08);border:0;border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap}
 .task button.on{background:rgba(255,255,255,.24)}
 .task .sp{flex:1}
+.a2-window-bar{background:#eef2f7}
 .task .clock{font-variant-numeric:tabular-nums;opacity:.85}
 @media (max-width:640px){body{grid-template-columns:0 1fr}.rail{display:none}}
 /* Physikalisches Glas is the shared a2ui-theme material (physical-glass.css / .js): the
@@ -414,69 +431,24 @@ body{font:14px/1.4 ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:#1b2430;b
 <body data-role="{role}">
 <header class="top"><img class="brandmark" src="/static/launcher/workspace.png" alt=""><b>Morpheus Desktop</b><span class="role">Rolle: {role} (Fixture)</span><span class="sp"></span><label style="font-size:12px"><input type="checkbox" id="glass"> Physikalisches Glas</label><select data-pg-bg-choice aria-label="Hintergrund" style="font:inherit;font-size:12px;border-radius:6px;border:0;padding:3px 6px"></select><button type="button" id="install" hidden>Installieren</button></header>
 <nav class="rail" aria-label="Apps">{rail}</nav>
-<main class="desk" id="desk">
+<main class="desk" id="desk" data-a2-desk>
 <h1 data-pg-on-bg>Arbeitsplatz</h1>
 <p class="lead" data-pg-on-bg>Microsoft-365-Apps öffnen sich als echte Web-Apps von Microsoft (↗), in einem eigenen Fenster oder der installierten App. Eigene Oberflächen öffnen sich hier als Fenster.</p>
 <div class="grid">{tiles}</div>
 <p class="legend" data-pg-on-bg>↗ = Microsoft 365, eigene Anmeldung bei Microsoft. Ohne ↗ = Fenster auf diesem Desktop.</p>
 </main>
-<footer class="task" id="task"><span class="sp"></span><span class="clock" id="clock"></span></footer>
+<footer class="task" id="task" data-a2-task><span class="sp"></span><span class="clock" id="clock"></span></footer>
 <script>
 (function () {
-  var desk = document.getElementById('desk'), task = document.getElementById('task');
-  var spacer = task.querySelector('.sp'), z = 10, wins = {};
+  /* Windows are the shared container script's (a2ui-theme containers/containers.js).
+     This page only counts launches; capture phase, so it runs before the opener does. */
   function record(id) {
     try { navigator.sendBeacon('/desktop/launch?app=' + encodeURIComponent(id)); } catch (e) {}
   }
-  function focus(w) {
-    w.el.classList.remove('min'); w.el.style.zIndex = ++z;
-    Object.keys(wins).forEach(function (k) { wins[k].btn.classList.toggle('on', wins[k] === w); });
-  }
-  function close(id) {
-    var w = wins[id]; if (!w) return;
-    w.el.remove(); w.btn.remove(); delete wins[id];
-  }
-  function open(id, title, src) {
-    if (wins[id]) { focus(wins[id]); return; }
-    var n = Object.keys(wins).length;
-    var el = document.createElement('section'); el.className = 'win';
-    el.style.left = (40 + 28 * n) + 'px'; el.style.top = (30 + 24 * n) + 'px';
-    el.style.width = Math.min(900, desk.clientWidth - 80) + 'px';
-    el.style.height = Math.min(600, desk.clientHeight - 60) + 'px';
-    el.setAttribute('role', 'dialog'); el.setAttribute('aria-label', title);
-    var bar = document.createElement('div'); bar.className = 'bar';
-    var t = document.createElement('b'); t.textContent = title; bar.appendChild(t);
-    var ne = document.createElement('a'); ne.href = src; ne.target = '_blank'; ne.rel = 'noopener'; ne.textContent = '↗'; ne.title = 'Als eigene Seite öffnen';
-    var mn = document.createElement('button'); mn.type = 'button'; mn.textContent = '–'; mn.title = 'Minimieren';
-    var cl = document.createElement('button'); cl.type = 'button'; cl.textContent = '×'; cl.title = 'Schließen';
-    bar.appendChild(ne); bar.appendChild(mn); bar.appendChild(cl);
-    var fr = document.createElement('iframe'); fr.src = src; fr.title = title;
-    el.appendChild(bar); el.appendChild(fr); desk.appendChild(el);
-    var btn = document.createElement('button'); btn.type = 'button'; btn.textContent = title;
-    task.insertBefore(btn, spacer);
-    var w = wins[id] = { el: el, btn: btn };
-    btn.onclick = function () { if (btn.classList.contains('on') && !el.classList.contains('min')) { el.classList.add('min'); btn.classList.remove('on'); } else focus(w); };
-    mn.onclick = function () { el.classList.add('min'); btn.classList.remove('on'); };
-    cl.onclick = function () { close(id); };
-    el.addEventListener('pointerdown', function () { focus(w); });
-    bar.addEventListener('pointerdown', function (e) {
-      if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
-      var sx = e.clientX, sy = e.clientY, ox = el.offsetLeft, oy = el.offsetTop;
-      fr.style.pointerEvents = 'none'; bar.setPointerCapture(e.pointerId);
-      function mv(ev) { el.style.left = Math.max(0, ox + ev.clientX - sx) + 'px'; el.style.top = Math.max(0, oy + ev.clientY - sy) + 'px'; }
-      function up() { fr.style.pointerEvents = ''; bar.removeEventListener('pointermove', mv); bar.removeEventListener('pointerup', up); }
-      bar.addEventListener('pointermove', mv); bar.addEventListener('pointerup', up);
-    });
-    focus(w);
-  }
-  document.querySelectorAll('[data-app]').forEach(function (a) {
-    if (a.classList.contains('int')) {
-      a.addEventListener('click', function () { open(a.dataset.app, a.dataset.title, a.dataset.src); record(a.dataset.app); });
-    } else {
-      // the browser follows the link in this same gesture; recording is advisory
-      a.addEventListener('click', function () { record(a.dataset.app); });
-    }
-  });
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('[data-app]');
+    if (a) record(a.dataset.app);
+  }, true);
   var clock = document.getElementById('clock');
   function tick() { clock.textContent = new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }); }
   tick(); setInterval(tick, 15000);
@@ -671,7 +643,7 @@ mod tests {
         assert!(ids(Role::Staff).contains(&"word-docs"));
         assert!(!ids(Role::Guest).contains(&"word-docs"));
         let p = page(Role::Staff);
-        assert!(p.contains(r#"class="tile int" data-app="word-docs" data-src="https://portal.msgraph.de/view/word""#));
+        assert!(p.contains(r#"class="tile int" data-app="word-docs" data-a2-open="embed" data-a2-src="https://portal.msgraph.de/view/word""#));
         assert!(ICONS.iter().any(|(name, _)| *name == word.icon));
     }
 
@@ -682,7 +654,7 @@ mod tests {
         assert!(ids(Role::Staff).contains(&"aduc"));
         assert!(!ids(Role::Guest).contains(&"aduc"));
         let p = page(Role::Staff);
-        assert!(p.contains(r#"class="tile int" data-app="aduc" data-src="https://portal.msgraph.de/view/directory/rollen-vorschau?design=classic&amp;user=u1&amp;v=3""#));
+        assert!(p.contains(r#"class="tile int" data-app="aduc" data-a2-open="embed" data-a2-src="https://portal.msgraph.de/view/directory/rollen-vorschau?design=classic&amp;user=u1&amp;v=3""#));
         for bad in [
             "http://portal.msgraph.de/view",
             "https://portal.msgraph.de.evil.example/",
@@ -710,7 +682,7 @@ mod tests {
             assert!(ids(Role::Staff).contains(&id));
             assert!(!ids(Role::Guest).contains(&id), "{id} is not for guests");
             assert!(page(Role::Staff).contains(&format!(
-                r#"class="tile int" data-app="{id}" data-src="https://portal.msgraph.de{path}""#
+                r#"class="tile int" data-app="{id}" data-a2-open="embed" data-a2-src="https://portal.msgraph.de{path}""#
             )));
         }
     }
@@ -732,10 +704,29 @@ mod tests {
         assert!(allowed_external("https://teams.microsoft.com/"));
     }
 
+    /// The desktop has no window manager of its own: windows are the shared container
+    /// script's, and the page creates no frame. CAN FIRE: bringing back the inline
+    /// window code (`createElement('iframe')`, `contentDocument`) fails here.
+    #[test]
+    fn windows_come_from_the_shared_container_script() {
+        let p = page(Role::Staff);
+        assert!(p.contains(r#"<script src="/static/a2ui/containers/containers.js" defer>"#));
+        assert!(p.contains(r#"<script src="/static/a2ui/vendor/htmx-2.0.4.min.js" defer>"#));
+        assert!(p.contains(r#"id="desk" data-a2-desk"#));
+        for gone in [
+            "createElement('iframe')",
+            "contentDocument",
+            "window.parent",
+            "function open(",
+        ] {
+            assert!(!p.contains(gone), "{gone}");
+        }
+    }
+
     /// A denied app is absent from the page, not hidden.
     #[test]
     fn a_role_sees_exactly_its_apps() {
-        assert_eq!(ids(Role::Guest), ["outlook", "teams", "paint"]);
+        assert_eq!(ids(Role::Guest), ["outlook", "teams", "paint", "surface"]);
         let guest = page(Role::Guest);
         for denied in ["word", "excel", "onedrive", "sharepoint", "hub", "lab"] {
             assert!(
@@ -854,14 +845,18 @@ mod tests {
         }
     }
 
-    /// External apps are plain links opened in the click; internal ones open a window.
+    /// External apps are plain links opened in the click; our own content opens natively
+    /// in a window, other origins and self-contained pages in an embedded one.
     #[test]
     fn external_apps_are_links_and_internal_apps_are_windows() {
         let p = page(Role::Staff);
         assert!(p.contains(
             r#"href="https://outlook.office.com/mail/" target="_blank" rel="noopener noreferrer""#
         ));
-        assert!(p.contains(r#"data-src="/paint""#));
+        assert!(p.contains(r#"data-a2-open="embed" data-a2-src="/paint""#));
+        assert!(p.contains(
+            r#"class="tile int" data-app="surface" href="/surface" data-a2-open="window""#
+        ));
         assert!(!p.contains("window.open"));
         assert!(
             !p.contains("<iframe src=\"https"),

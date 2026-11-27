@@ -39,6 +39,9 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod container;
+pub use container::{Container, FragmentError, SignIn, check_fragment};
+
 /// Die sechs benannten Zonen. **Adressen, keine Style-Hooks.**
 ///
 /// Ein Template spricht eine Zone an; es gestaltet sie nicht. Deshalb sind
