@@ -55,6 +55,8 @@ use ogar_render_askama::{ActionRef, FieldView};
 mod desktop;
 #[cfg(feature = "pwa")]
 mod pwa;
+#[cfg(feature = "pwa")]
+mod surface;
 
 /// The Material Laboratory: the glass material rendered from `a2ui_paint::optics`.
 mod lab;
@@ -564,7 +566,7 @@ async fn main() {
     #[cfg(not(feature = "pwa"))]
     let app = app.route("/", get(index));
     #[cfg(feature = "pwa")]
-    let app = desktop::routes(app);
+    let app = surface::routes(desktop::routes(app));
     let app = app
         .route("/html", get(fieldview_html))
         .route("/delta.bin", get(delta_frame))
